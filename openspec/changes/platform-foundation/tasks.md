@@ -85,9 +85,9 @@
 
 ## 11. Verificación end-to-end
 
-- [ ] 11.1 Correr `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test` localmente — todos en verde
-- [ ] 11.2 Correr `pnpm db:generate` y `pnpm db:migrate` contra la DB local de Docker — exit 0
-- [ ] 11.3 Validar el change con `openspec validate platform-foundation` — output "Change is valid"
-- [ ] 11.4 Crear PR de prueba; verificar que CI corre los 3 jobs y todos pasan
-- [ ] 11.5 Revisar manualmente que `git grep -E 'from.*db/client' src/` solo encuentra archivos en `src/infrastructure/db/repositories/**`
-- [ ] 11.6 Commit final con mensaje conventional `feat(platform): bootstrap multi-tenant foundation`
+- [x] 11.1 Correr `npm install`, `npm run lint`, `npm run typecheck`, `npm run test` localmente — todos en verde
+- [x] 11.2 Correr `npm run db:generate` y `npm run db:migrate` contra la DB local de Docker — exit 0 (auto-detect driver agregado en `migrate.ts`)
+- [x] 11.3 Validar el change con `openspec validate platform-foundation` — output "Change is valid"
+- [ ] 11.4 Crear PR de prueba; verificar que CI corre los 3 jobs y todos pasan *(BLOQUEADO: requiere repo en GitHub)*
+- [x] 11.5 Revisar manualmente que `git grep -E 'from.*db/client' src/` solo encuentra archivos en `src/infrastructure/db/repositories/**` (único hit: `infrastructure/db/repositories/base.ts`)
+- [ ] 11.6 Commit final con mensaje conventional `feat(platform): bootstrap multi-tenant foundation` *(pendiente: confirmar con el usuario antes de commitear)*
