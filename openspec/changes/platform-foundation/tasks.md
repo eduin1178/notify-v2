@@ -73,8 +73,8 @@
 - [x] 9.3 Cachear `pnpm store` y `node_modules` con `actions/setup-node@v4` + `cache: pnpm` (adaptado a npm: `cache: npm` + `cache-dependency-path: src/package-lock.json`)
 - [x] 9.4 Configurar `pnpm install --frozen-lockfile` en cada job (adaptado: `npm ci`)
 - [x] 9.5 Setear secret `DATABASE_URL` (test DB) y `ENCRYPTION_KEY_V1` (random fixture) en el job de test vía `env`
-- [ ] 9.6 Marcar los 3 jobs como required checks en branch protection de `main` *(BLOQUEADO: el repo no tiene remote en GitHub todavía. Acción del usuario: crear repo + push + branch protection rule)*
-- [ ] 9.7 Verificar que un PR de prueba con `npm run lint` rojo bloquea merge (smoke test del pipeline) *(BLOQUEADO: requiere repo en GitHub + PR con error intencional. Acción del usuario)*
+- [x] 9.6 Marcar los 3 jobs como required checks en branch protection de `main` (configurado vía `gh api` en `eduin1178/notify-v2`: required_status_checks `lint`/`typecheck`/`test` con `strict: true`, `enforce_admins: false`, `allow_force_pushes`/`allow_deletions: false`)
+- [x] 9.7 Verificar que un PR de prueba con `npm run lint` rojo bloquea merge (smoke test del pipeline) (PR #2 con violaciones intencionales `prefer-const` + `no-explicit-any` → `lint` rojo, `mergeStateStatus: BLOCKED`; cerrada sin merge, rama eliminada)
 
 ## 10. Documentación interna
 
@@ -88,6 +88,6 @@
 - [x] 11.1 Correr `npm install`, `npm run lint`, `npm run typecheck`, `npm run test` localmente — todos en verde
 - [x] 11.2 Correr `npm run db:generate` y `npm run db:migrate` contra la DB local de Docker — exit 0 (auto-detect driver agregado en `migrate.ts`)
 - [x] 11.3 Validar el change con `openspec validate platform-foundation` — output "Change is valid"
-- [ ] 11.4 Crear PR de prueba; verificar que CI corre los 3 jobs y todos pasan *(BLOQUEADO: requiere repo en GitHub)*
+- [x] 11.4 Crear PR de prueba; verificar que CI corre los 3 jobs y todos pasan (PR #1 `feat/platform-foundation` → `main` en `eduin1178/notify-v2`: `lint` ✅ 35s, `typecheck` ✅ 28s, `test` ✅ 43s)
 - [x] 11.5 Revisar manualmente que `git grep -E 'from.*db/client' src/` solo encuentra archivos en `src/infrastructure/db/repositories/**` (único hit: `infrastructure/db/repositories/base.ts`)
-- [ ] 11.6 Commit final con mensaje conventional `feat(platform): bootstrap multi-tenant foundation` *(pendiente: confirmar con el usuario antes de commitear)*
+- [x] 11.6 Commit final con mensaje conventional `feat(platform): bootstrap multi-tenant foundation` (cubierto por commits `a52eac6` + `4d42366` + `424be99` en la rama `feat/platform-foundation`)
