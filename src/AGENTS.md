@@ -20,3 +20,43 @@ Si una instrucción del usuario contradice la constitución, pausá y señalá e
 
 - **Proyecto** Localizado en la carpeta /src, no es necesario volver a crearlo.
 
+# Platform foundation — reglas de oro
+
+Estas reglas son consecuencia directa de los principios constitucionales §2.1 (aislamiento multi-tenant) y §2.8 (cifrado de credenciales BYO). **Romperlas no es una opción.** Si una feature las contradice, parás y planteás el conflicto antes de tocar código.
+
+## NUNCA
+
+1. **NUNCA instanciar un repositorio sin `TenantContext` activo.** El constructor de `BaseRepository` lee `getTenantContext()` desde `AsyncLocalStorage`. Si no estás dentro de `runWithTenant(...)`, lanza `Error("TenantContext not initialized — orphan request")`. No hay escape hatch — y no se agrega.
+2. **NUNCA persistir credenciales BYO sin pasar por `encrypt()`.** Cloud API tokens, sesiones WAHA, API keys de OpenRouter del cliente: TODOS van por `infrastructure/crypto/encryption.ts`. El valor en la DB es del shape `v1:iv:ct:tag`. Una columna BYO en texto plano es bug, no decisión.
+3. **NUNCA exportar `db` o `dbTx` (`getDbTx`) fuera de `infrastructure/db/repositories/**`.** El cliente Drizzle es detalle interno — los consumidores externos (`application/`, `app/`, otros directorios de `infrastructure/`) usan repositorios. Si necesitás "una query rara", primero proponé extender el repo. Si justificás un escape, pasa por review.
+4. **NUNCA romper los boundaries hexagonales.** ESLint los enforce, pero la regla en tu cabeza es: `domain` no importa adapters; `application` no importa `infrastructure`; `infrastructure` no importa `app`. `import type` desde `domain/**` está permitido siempre.
+
+## Flujo para crear un repositorio nuevo
+
+1. **Schema Drizzle** en `src/infrastructure/db/schema/<feature>.ts` con columna `organization_id` (string, not null, FK a `organizations.id`).
+2. **Generar migration**: `npm run db:generate`. Inspeccioná el SQL en `infrastructure/db/migrations/`.
+3. **Repositorio concreto** en `src/infrastructure/db/repositories/<feature>Repository.ts` extendiendo `BaseRepository<TTable>`:
+   - `protected readonly table = <featureTable>` — el schema Drizzle
+   - Métodos públicos (`findByX`, `create`, etc.) componen `this.scopedWhere()` para reads y `this.withOrgId(input)` para inserts
+   - El tipo `Insertable<Feature>` excluye `organizationId` del shape recibido
+4. **Test de aislamiento obligatorio** en `<feature>Repository.test.ts`:
+   ```ts
+   import { assertTenantIsolation } from "../../../test/assertTenantIsolation";
+
+   it("isolates rows per organization", async () => {
+     await assertTenantIsolation(
+       (ctx) => new FeatureRepository(ctx),
+       { /* sample insertable, sin organizationId */ },
+     );
+   });
+   ```
+   Sin este test el repo NO entra a `main`.
+5. **Verificación pre-commit**: `npm run lint && npm run typecheck && npm run test`. Los tres en verde, sin excepciones.
+
+## Cómo agregar una columna BYO cifrada
+
+1. En el schema, declarar la columna como `text("token").notNull()` — el tipo de DB es texto, no `Encrypted` (el formato `v1:...` cabe en text).
+2. En el repositorio, `create()` invoca `encrypt(plaintext)` antes del insert; `find...()` invoca `decrypt(row.token)` antes de devolver.
+3. JAMÁS exponer la columna cruda en una API de salida — el dominio devuelve el plaintext (post-decrypt) o un wrapper opaco.
+4. Test obligatorio: round-trip del valor (insert plaintext → DB tiene `v1:...` → read devuelve plaintext igual). Asertar que la DB NO contiene el plaintext (query directa por la columna).
+
