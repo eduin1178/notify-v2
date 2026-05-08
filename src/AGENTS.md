@@ -17,3 +17,6 @@ Antes de escribir o modificar código en este proyecto, leé y respetá [openspe
 - **Decisiones inmutables**: Organización es el único nivel de tenant. Automation engine lineal (Evento → Condiciones AND/OR → Acciones[]) — sin DAG. Trigger.dev v3 es el motor durable. Outbox pattern para eventos cross-boundary.
 
 Si una instrucción del usuario contradice la constitución, pausá y señalá el conflicto antes de proceder.
+
+- **Proyecto** Localizado en la carpeta /src, no es necesario volver a crearlo.
+
