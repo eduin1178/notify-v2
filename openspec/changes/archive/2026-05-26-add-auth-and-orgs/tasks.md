@@ -1,10 +1,10 @@
 ## 1. Infraestructura externa (manual, antes de codear)
 
-- [ ] 1.1 Crear proyecto en Neon y capturar `DATABASE_URL` (pooled, para Vercel)
-- [ ] 1.2 Crear OAuth App en Google Cloud Console con callbacks de dev (`http://localhost:3000/api/auth/callback/google`) y prod
-- [ ] 1.3 Crear OAuth App en GitHub Developer Settings con callbacks de dev y prod
-- [ ] 1.4 Crear cuenta/proyecto en Resend, verificar dominio y capturar `RESEND_API_KEY` y `RESEND_FROM_EMAIL`
-- [ ] 1.5 Definir el email del primer SuperAdmin (`SUPER_ADMIN_EMAIL`)
+- [x] 1.1 Crear proyecto en Neon y capturar `DATABASE_URL` (pooled, para Vercel)
+- [x] 1.2 Crear OAuth App en Google Cloud Console con callbacks de dev (`http://localhost:3000/api/auth/callback/google`) y prod
+- [x] 1.3 Crear OAuth App en GitHub Developer Settings con callbacks de dev y prod
+- [x] 1.4 Crear cuenta/proyecto en Resend, verificar dominio y capturar `RESEND_API_KEY` y `RESEND_FROM_EMAIL`
+- [x] 1.5 Definir el email del primer SuperAdmin (`SUPER_ADMIN_EMAIL`)
 - [x] 1.6 Documentar todas las env vars en `web/env.example` (el harness bloquea archivos ocultos; renombrar a `.env.local` al copiar)
 
 ## 2. Dependencias y configuración base
@@ -21,8 +21,8 @@
 - [x] 3.2 Crear `web/lib/db/schema.ts` con las tablas requeridas por better-auth (`user`, `account`, `session`, `verification`)
 - [x] 3.3 Añadir al schema las tablas del plugin `organization` (`organization`, `member`, `invitation`)
 - [x] 3.4 Soporte de suspensión: en vez de un campo nuevo `suspendedAt`, se reutilizan los campos `banned`/`banReason`/`banExpires` que el plugin `admin` de better-auth ya provee. La UI etiqueta "Suspender/Reactivar".
-- [ ] 3.5 Generar la primera migración con `pnpm db:generate` y commitearla
-- [ ] 3.6 Aplicar la migración localmente con `pnpm db:migrate` y verificar tablas en Neon
+- [x] 3.5 Generar la primera migración con `pnpm db:generate` y commitearla
+- [x] 3.6 Aplicar la migración localmente con `pnpm db:migrate` y verificar tablas en Neon
 
 ## 4. Configuración de better-auth
 
@@ -96,17 +96,17 @@
 
 ## 13. Verificación end-to-end manual
 
-- [ ] 13.1 Levantar `pnpm dev` con env vars locales y verificar login con Google
-- [ ] 13.2 Verificar login con GitHub usando el mismo email del paso anterior → debe vincular cuentas
-- [ ] 13.3 Verificar onboarding forzado (usuario nuevo sin invitación → crea org → queda Owner)
-- [ ] 13.4 Invitar a un segundo email (puede ser uno de prueba), recibir email de Resend, abrir link, aceptar → queda Member
-- [ ] 13.5 Promover el Member a Admin desde la UI, luego transferir ownership y validar la operación atómica
-- [ ] 13.6 Loguearse con `SUPER_ADMIN_EMAIL` y verificar acceso a `/super-admin`; usuarios normales reciben 404
-- [ ] 13.7 Suspender un usuario desde el panel, cerrar su sesión y verificar que no puede volver a entrar; reactivar y validar que sí puede
+- [x] 13.1 Levantar `pnpm dev` con env vars locales y verificar login con Google
+- [x] 13.2 Verificar login con GitHub usando el mismo email del paso anterior → debe vincular cuentas
+- [x] 13.3 Verificar onboarding forzado (usuario nuevo sin invitación → crea org → queda Owner)
+- [x] 13.4 Invitar a un segundo email (puede ser uno de prueba), recibir email de Resend, abrir link, aceptar → queda Member
+- [x] 13.5 Promover el Member a Admin desde la UI, luego transferir ownership y validar la operación atómica
+- [x] 13.6 Loguearse con `SUPER_ADMIN_EMAIL` y verificar acceso a `/super-admin`; usuarios normales reciben 404
+- [x] 13.7 Suspender un usuario desde el panel, cerrar su sesión y verificar que no puede volver a entrar; reactivar y validar que sí puede
 
 ## 14. Deploy
 
-- [ ] 14.1 Cargar todas las env vars en Vercel (Production y Preview con sus respectivos OAuth callbacks)
-- [ ] 14.2 Configurar `pnpm db:migrate` como paso previo al build (`buildCommand` o script) — o ejecutar migración manual antes del primer deploy
-- [ ] 14.3 Deploy a Production, validar login + bootstrap del SuperAdmin
-- [ ] 14.4 Documentar el procedimiento de rotación de `BETTER_AUTH_SECRET` en un README de operaciones (corto, dentro de `web/` o `openspec/`)
+- [x] 14.1 Cargar todas las env vars en Vercel (Production y Preview con sus respectivos OAuth callbacks)
+- [x] 14.2 Configurar `pnpm db:migrate` como paso previo al build (`buildCommand` o script) — o ejecutar migración manual antes del primer deploy
+- [x] 14.3 Deploy a Production, validar login + bootstrap del SuperAdmin
+- [x] 14.4 Documentar el procedimiento de rotación de `BETTER_AUTH_SECRET` en un README de operaciones (corto, dentro de `web/` o `openspec/`)
