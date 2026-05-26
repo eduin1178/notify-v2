@@ -34,7 +34,7 @@ Estas reglas son consecuencia directa de los principios constitucionales §2.1 (
 ## Flujo para crear un repositorio nuevo
 
 1. **Schema Drizzle** en `src/infrastructure/db/schema/<feature>.ts` con columna `organization_id` (string, not null, FK a `organizations.id`).
-2. **Generar migration**: `npm run db:generate`. Inspeccioná el SQL en `infrastructure/db/migrations/`.
+2. **Generar migration**: `pnpm db:generate`. Inspeccioná el SQL en `infrastructure/db/migrations/`.
 3. **Repositorio concreto** en `src/infrastructure/db/repositories/<feature>Repository.ts` extendiendo `BaseRepository<TTable>`:
    - `protected readonly table = <featureTable>` — el schema Drizzle
    - Métodos públicos (`findByX`, `create`, etc.) componen `this.scopedWhere()` para reads y `this.withOrgId(input)` para inserts
@@ -51,7 +51,7 @@ Estas reglas son consecuencia directa de los principios constitucionales §2.1 (
    });
    ```
    Sin este test el repo NO entra a `main`.
-5. **Verificación pre-commit**: `npm run lint && npm run typecheck && npm run test`. Los tres en verde, sin excepciones.
+5. **Verificación pre-commit**: `pnpm lint && pnpm typecheck && pnpm test`. Los tres en verde, sin excepciones.
 
 ## Cómo agregar una columna BYO cifrada
 
