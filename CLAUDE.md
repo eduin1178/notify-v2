@@ -35,6 +35,7 @@ No test runner is configured yet.
   - Components go in `@/components/ui` (e.g. [web/components/ui/button.tsx](web/components/ui/button.tsx)); shared utilities in `@/lib`; hooks alias is `@/hooks`
   - Add components with `pnpm dlx shadcn@latest add <component>` from inside `web/`
 - **Path aliases** are defined in [web/tsconfig.json](web/tsconfig.json) — `@/*` maps to `web/*`.
+- **NextJs 16 usa proxy.ts en lugar de middleware.ts** Para conocer su implementación puedes consultar su documentación
 
 ## OpenSpec Workflow
 
