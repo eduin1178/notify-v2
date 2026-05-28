@@ -44,7 +44,7 @@ export async function createOrganizationAction(
   }
 
   void session;
-  redirect(`/o/${createdSlug}`);
+  redirect(`/org/${createdSlug}`);
 }
 
 async function generateUniqueSlug(name: string): Promise<string> {

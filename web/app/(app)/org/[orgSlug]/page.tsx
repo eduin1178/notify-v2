@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OrgDashboardPage({
   params,
-}: PageProps<"/o/[orgSlug]">) {
+}: PageProps<"/org/[orgSlug]">) {
   const { orgSlug } = await params;
   const ctx = await loadOrgContext(orgSlug);
 
@@ -37,7 +37,7 @@ export default async function OrgDashboardPage({
           </p>
           <p className="mt-2 text-2xl font-semibold">{memberCount.length}</p>
           <Link
-            href={`/o/${ctx.organization.slug}/members`}
+            href={`/org/${ctx.organization.slug}/members`}
             className="mt-3 inline-block text-sm text-muted-foreground hover:text-foreground"
           >
             Gestionar miembros →

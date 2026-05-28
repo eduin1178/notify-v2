@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   reactivateUserAction,
   suspendUserAction,
-} from "@/app/super-admin/users/actions";
+} from "@/app/(app)/super-admin/users/actions";
 
 type Props = {
   userId: string;

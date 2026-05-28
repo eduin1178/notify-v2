@@ -93,7 +93,7 @@ export async function inviteMemberAction(
     return { error: "No pudimos crear la invitación." };
   }
 
-  revalidatePath(`/o/${orgSlug}/members`);
+  revalidatePath(`/org/${orgSlug}/members`);
   return { ok: true };
 }
 
@@ -140,7 +140,7 @@ export async function changeMemberRoleAction(
     return { error: "No pudimos cambiar el rol." };
   }
 
-  revalidatePath(`/o/${orgSlug}/members`);
+  revalidatePath(`/org/${orgSlug}/members`);
   return { ok: true };
 }
 
@@ -181,7 +181,7 @@ export async function removeMemberAction(
     return { error: "No pudimos remover al miembro." };
   }
 
-  revalidatePath(`/o/${orgSlug}/members`);
+  revalidatePath(`/org/${orgSlug}/members`);
   return { ok: true };
 }
 
@@ -265,7 +265,7 @@ export async function transferOwnershipAction(
     };
   }
 
-  revalidatePath(`/o/${orgSlug}/members`);
+  revalidatePath(`/org/${orgSlug}/members`);
   return { ok: true };
 }
 
@@ -333,6 +333,6 @@ export async function cancelInvitationAction(
     return { error: "No pudimos cancelar la invitación." };
   }
 
-  revalidatePath(`/o/${orgSlug}/members`);
+  revalidatePath(`/org/${orgSlug}/members`);
   return { ok: true };
 }

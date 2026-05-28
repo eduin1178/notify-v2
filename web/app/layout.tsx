@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import { Navbar } from "@/components/site/navbar";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -30,10 +29,7 @@ export default function RootLayout({
       className={cn("h-full", "antialiased", inter.variable, jetbrainsMono.variable, "font-sans")}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
-        <Navbar />
-        {children}
-      </body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

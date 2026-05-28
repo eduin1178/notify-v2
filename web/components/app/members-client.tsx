@@ -19,7 +19,7 @@ import {
   inviteMemberAction,
   removeMemberAction,
   transferOwnershipAction,
-} from "@/app/(app)/o/[orgSlug]/members/actions";
+} from "@/app/(app)/org/[orgSlug]/members/actions";
 
 type Role = "owner" | "admin" | "member";
 

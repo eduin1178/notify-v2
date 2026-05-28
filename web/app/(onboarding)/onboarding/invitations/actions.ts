@@ -55,7 +55,7 @@ export async function acceptInvitationAction(
     redirect("/post-auth");
   }
 
-  redirect(`/o/${slug}`);
+  redirect(`/org/${slug}`);
 }
 
 export async function rejectInvitationAction(

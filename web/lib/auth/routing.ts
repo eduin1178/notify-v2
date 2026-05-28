@@ -67,7 +67,7 @@ export function destinationToPath(destination: PostAuthDestination): string {
     case "super-admin":
       return "/super-admin";
     case "active-org":
-      return `/o/${destination.slug}`;
+      return `/org/${destination.slug}`;
     case "invitations":
       return "/onboarding/invitations";
     case "onboarding-new-org":

@@ -18,11 +18,13 @@ El sistema SHALL modelar SuperAdmin como un atributo del usuario a nivel platafo
 
 ### Requirement: Panel de administración de plataforma
 
-El sistema SHALL exponer una ruta `/super-admin` accesible exclusivamente para usuarios con rol SuperAdmin. La ruta MUST listar todas las organizaciones y todos los usuarios de la plataforma con capacidad de inspección.
+El sistema SHALL exponer una ruta `/super-admin` accesible exclusivamente para usuarios con rol SuperAdmin. La ruta MUST listar todas las organizaciones y todos los usuarios de la plataforma con capacidad de inspección. El panel MUST renderizarse dentro del shell unificado `(app)/` usando el `AppSidebar` en `mode="super-admin"`; NO MUST tener un header propio inline ni un menú de usuario separado.
 
 #### Scenario: Acceso autorizado al panel
 - **WHEN** un SuperAdmin navega a `/super-admin`
-- **THEN** el sistema renderiza el panel con la lista de organizaciones y usuarios
+- **THEN** el sistema renderiza el panel dentro del shell `(app)/` con `AppSidebar` en modo super-admin
+- **AND** el sidebar muestra las entradas "Organizaciones" y "Usuarios"
+- **AND** el sidebar ofrece "Volver a la app" que navega a `/post-auth`
 
 #### Scenario: Acceso no autorizado al panel
 - **WHEN** un usuario que no es SuperAdmin navega a `/super-admin`
@@ -31,6 +33,10 @@ El sistema SHALL exponer una ruta `/super-admin` accesible exclusivamente para u
 #### Scenario: Acceso sin sesión
 - **WHEN** un visitante sin sesión navega a `/super-admin`
 - **THEN** el sistema lo redirige a `/sign-in`
+
+#### Scenario: La URL pública no cambia
+- **WHEN** se accede al panel desde cualquier enlace o redirect
+- **THEN** la URL pública sigue siendo `/super-admin` (el route group `(app)` no afecta el path)
 
 ### Requirement: Suspensión de usuarios desde el panel
 

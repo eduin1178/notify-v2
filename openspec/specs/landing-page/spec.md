@@ -38,41 +38,51 @@ The system SHALL identify the site as "Notify" through both the document metadat
 
 ### Requirement: Sticky top navigation bar
 
-The system SHALL render a top navigation bar that remains visible at the top of the viewport while the user scrolls the landing page.
+El sistema SHALL renderizar una barra de navegación superior que permanece visible al hacer scroll. La `Navbar` MUST vivir exclusivamente dentro del route group `(marketing)/` y MUST NOT renderizarse en el root `app/layout.tsx` ni en áreas autenticadas (`(app)/`).
 
 #### Scenario: Initial render
 
-- **WHEN** the landing page is rendered
-- **THEN** the navbar is positioned at the top of the viewport
-- **AND** it spans the full width of the viewport
+- **WHEN** la landing page se renderiza
+- **THEN** la `Navbar` se posiciona al tope del viewport
+- **AND** abarca el ancho completo del viewport
 
 #### Scenario: Scrolling the page
 
-- **WHEN** the user scrolls the page vertically
-- **THEN** the navbar remains visible (sticky), pinned to the top of the viewport
+- **WHEN** el usuario hace scroll vertical
+- **THEN** la `Navbar` permanece visible (sticky), anclada al tope
+
+#### Scenario: Navbar ausente en áreas autenticadas
+
+- **WHEN** un usuario navega a `/org/{slug}`, `/super-admin`, `/onboarding/...` o `/invitations/{token}`
+- **THEN** la `Navbar` de marketing NO se renderiza en esa página
 
 ---
 
 ### Requirement: Authentication entry-point buttons
 
-The navbar SHALL expose two buttons that anticipate future authentication routes: "Iniciar sesión" and "Registrarse". They are non-functional placeholders in this change.
+La `Navbar` SHALL exponer acciones de autenticación que navegan a rutas reales y que se adaptan al estado de sesión del visitante. La navbar es server component y MUST consultar `getSession()` para decidir qué CTAs mostrar.
 
-#### Scenario: Buttons are present
+#### Scenario: Visitante sin sesión
 
-- **WHEN** the landing page is rendered
-- **THEN** the navbar contains a button labeled "Iniciar sesión"
-- **AND** the navbar contains a button labeled "Registrarse"
+- **WHEN** la landing page se renderiza para un visitante sin sesión
+- **THEN** la `Navbar` muestra un único botón con label "Iniciar sesión"
+- **AND** ese botón navega a `/sign-in`
 
-#### Scenario: Visual hierarchy
+#### Scenario: Visitante con sesión
 
-- **WHEN** the navbar buttons are rendered
-- **THEN** "Iniciar sesión" uses the shadcn `Button` `variant="ghost"` (low visual weight)
-- **AND** "Registrarse" uses the shadcn `Button` `variant="default"` (primary visual weight)
+- **WHEN** la landing page se renderiza para un usuario autenticado
+- **THEN** la `Navbar` muestra una acción "Dashboard" que navega a `/post-auth`
+- **AND** muestra una acción "Cerrar sesión" que invoca `signOut()` del cliente better-auth y redirige a `/`
 
-#### Scenario: No navigation
+#### Scenario: No existe botón "Registrarse"
 
-- **WHEN** the user clicks either button
-- **THEN** the system does not navigate to a new route and does not throw an error
+- **WHEN** la landing page se renderiza
+- **THEN** la `Navbar` NO MUST contener un botón con label "Registrarse"
+
+#### Scenario: Copy en español neutro
+
+- **WHEN** los CTAs de la `Navbar` se renderizan en cualquier estado
+- **THEN** los labels usan "tú" y NO contienen voseo ni regionalismos
 
 ---
 

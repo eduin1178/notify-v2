@@ -46,5 +46,5 @@ export async function acceptInvitationByTokenAction(
 
   if (!orgRow[0]) redirect("/post-auth");
 
-  redirect(`/o/${orgRow[0].slug}`);
+  redirect(`/org/${orgRow[0].slug}`);
 }
