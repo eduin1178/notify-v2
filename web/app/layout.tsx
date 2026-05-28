@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { getThemeCookie } from "@/lib/theme/cookie";
+import { THEME_INIT_SCRIPT } from "@/lib/theme/script";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -18,17 +20,31 @@ export const metadata: Metadata = {
   description: "Envía notificaciones a tus usuarios de forma simple y confiable.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const theme = await getThemeCookie();
+  const initialDark = theme === "dark";
+
   return (
     <html
       lang="es"
-      className={cn("h-full", "antialiased", inter.variable, jetbrainsMono.variable, "font-sans")}
+      data-theme={theme}
+      className={cn(
+        "h-full",
+        "antialiased",
+        inter.variable,
+        jetbrainsMono.variable,
+        "font-sans",
+        initialDark && "dark",
+      )}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

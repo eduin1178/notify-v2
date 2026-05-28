@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { SignInButtons } from "@/components/auth/sign-in-buttons";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 export const metadata: Metadata = {
   title: "Iniciar sesión · Notify",
@@ -20,7 +21,10 @@ export default async function SignInPage({
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center px-4 py-16">
+    <main className="relative flex flex-1 items-center justify-center px-4 py-16">
+      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+        <ThemeToggle align="end" />
+      </div>
       <section className="w-full max-w-sm space-y-6">
         <header className="space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Inicia sesión</h1>

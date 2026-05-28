@@ -1,11 +1,17 @@
 "use client";
 
+import * as React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   CaretUpDownIcon,
+  CheckIcon,
+  DesktopIcon,
+  MoonIcon,
   ShieldStarIcon,
   SignOutIcon,
+  SunIcon,
+  UserCircleIcon,
 } from "@phosphor-icons/react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,6 +22,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -25,6 +34,29 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { signOut } from "@/lib/auth/client";
+import { setThemePreference } from "@/lib/theme/actions";
+
+type ThemePreference = "light" | "dark" | "system";
+
+const COOKIE_NAME = "notify-theme";
+
+function readThemeCookie(): ThemePreference {
+  if (typeof document === "undefined") return "system";
+  const m = document.cookie.match(/(?:^|; )notify-theme=([^;]+)/);
+  const raw = m ? decodeURIComponent(m[1]) : "system";
+  return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
+}
+
+function applyThemeClient(pref: ThemePreference) {
+  if (typeof document === "undefined") return;
+  const el = document.documentElement;
+  const dark =
+    pref === "dark" ||
+    (pref === "system" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
+  el.classList.toggle("dark", dark);
+  el.dataset.theme = pref;
+}
 
 export type NavUserProps = {
   user: {
@@ -38,6 +70,19 @@ export type NavUserProps = {
 export function NavUser({ user }: NavUserProps) {
   const { isMobile } = useSidebar();
   const router = useRouter();
+  const [theme, setTheme] = React.useState<ThemePreference>("system");
+
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(readThemeCookie());
+  }, []);
+
+  function selectTheme(value: ThemePreference) {
+    setTheme(value);
+    applyThemeClient(value);
+    document.cookie = `${COOKIE_NAME}=${value}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+    void setThemePreference(value);
+  }
 
   async function handleSignOut() {
     await signOut({
@@ -94,19 +139,73 @@ export function NavUser({ user }: NavUserProps) {
                 </div>
               </div>
             </DropdownMenuLabel>
-            {user.isSuperAdmin ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem asChild>
-                    <Link href="/super-admin">
-                      <ShieldStarIcon />
-                      Plataforma
-                    </Link>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link href="/account">
+                  <UserCircleIcon />
+                  Mi cuenta
+                </Link>
+              </DropdownMenuItem>
+              {user.isSuperAdmin ? (
+                <DropdownMenuItem asChild>
+                  <Link href="/super-admin">
+                    <ShieldStarIcon />
+                    Plataforma
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  {theme === "dark" ? (
+                    <MoonIcon />
+                  ) : theme === "light" ? (
+                    <SunIcon />
+                  ) : (
+                    <DesktopIcon />
+                  )}
+                  Tema
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      selectTheme("light");
+                    }}
+                  >
+                    <SunIcon />
+                    <span className="flex-1">Claro</span>
+                    {theme === "light" ? (
+                      <CheckIcon className="size-4" weight="bold" />
+                    ) : null}
                   </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </>
-            ) : null}
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      selectTheme("dark");
+                    }}
+                  >
+                    <MoonIcon />
+                    <span className="flex-1">Oscuro</span>
+                    {theme === "dark" ? (
+                      <CheckIcon className="size-4" weight="bold" />
+                    ) : null}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      selectTheme("system");
+                    }}
+                  >
+                    <DesktopIcon />
+                    <span className="flex-1">Sistema</span>
+                    {theme === "system" ? (
+                      <CheckIcon className="size-4" weight="bold" />
+                    ) : null}
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={(event) => {
