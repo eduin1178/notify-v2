@@ -47,7 +47,14 @@ export type AppSidebarProps =
 export function AppSidebar(
   props: AppSidebarProps & React.ComponentProps<typeof Sidebar>,
 ) {
-  const { mode, user, items, ...sidebarProps } = props;
+  const { mode, user, items, ...rest } = props;
+  const {
+    teams: _teams,
+    activeTeamId: _activeTeamId,
+    ...sidebarProps
+  } = rest as typeof rest & { teams?: unknown; activeTeamId?: unknown };
+  void _teams;
+  void _activeTeamId;
 
   return (
     <Sidebar collapsible="icon" {...sidebarProps}>

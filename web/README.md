@@ -1,5 +1,16 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## REST API
+
+La lógica de negocio vive en `lib/services/` (pura, sin Next ni Hono) y se expone:
+
+- **REST** vía Hono + OpenAPI bajo `/api/v1/...` — ver [lib/api/README.md](./lib/api/README.md).
+- **Server Components / Server Actions** que actúan como adaptadores delgados.
+
+Capa de servicios y sus reglas: ver [lib/services/README.md](./lib/services/README.md).
+
+Docs interactivas en dev: `http://localhost:3000/api/v1/docs`.
+
 ## Getting Started
 
 First, run the development server:

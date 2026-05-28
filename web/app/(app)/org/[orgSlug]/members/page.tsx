@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import { and, eq, gt } from "drizzle-orm";
 
 import { loadOrgContext } from "@/lib/org/context";
+import { buildServerServiceContext } from "@/lib/api/server-ctx";
 import { db } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { can } from "@/lib/auth/permissions";
+import { listMembers } from "@/lib/services/orgs/service";
 import { MembersClient } from "@/components/app/members-client";
 
 export const metadata: Metadata = {
@@ -19,20 +21,9 @@ export default async function MembersPage({
 }: PageProps<"/org/[orgSlug]/members">) {
   const { orgSlug } = await params;
   const ctx = await loadOrgContext(orgSlug);
+  const svcCtx = await buildServerServiceContext();
 
-  const members = await db
-    .select({
-      memberId: schema.member.id,
-      userId: schema.member.userId,
-      role: schema.member.role,
-      createdAt: schema.member.createdAt,
-      name: schema.user.name,
-      email: schema.user.email,
-      image: schema.user.image,
-    })
-    .from(schema.member)
-    .innerJoin(schema.user, eq(schema.user.id, schema.member.userId))
-    .where(eq(schema.member.organizationId, ctx.organization.id));
+  const { members } = await listMembers(svcCtx, ctx.organization.id);
 
   const now = new Date();
   const pendingInvitations = await db
@@ -69,9 +60,9 @@ export default async function MembersPage({
       canDelete={canDelete}
       canTransfer={canTransfer}
       members={members.map((m) => ({
-        memberId: m.memberId,
+        memberId: m.id,
         userId: m.userId,
-        role: normalizeRole(m.role),
+        role: m.role,
         name: m.name,
         email: m.email,
         image: m.image,
