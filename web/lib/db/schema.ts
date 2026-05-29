@@ -74,6 +74,10 @@ export const organization = pgTable("organization", {
   logo: text("logo"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   metadata: text("metadata"),
+
+  // Customer de Kapso vinculado a esta organización (relación 1:1, creación
+  // perezosa en la primera conexión de WhatsApp). Ver change whatsapp-connection.
+  kapsoCustomerId: text("kapso_customer_id").unique(),
 });
 
 export const member = pgTable("member", {
@@ -193,6 +197,51 @@ export const usageEvent = pgTable("usage_event", {
   occurredAt: timestamp("occurred_at").notNull().defaultNow(),
 });
 
+// ── WhatsApp connection ─────────────────────────────────────────────────────
+// Conexiones de WhatsApp de una organización vía Kapso (1 org → N conexiones).
+// NO almacena tokens de Meta: Kapso es el BSP. Solo identificadores y estado.
+// status: pending | connected | disconnected | needs_reconnect | failed
+export const whatsappConnection = pgTable(
+  "whatsapp_connection",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    // Customer de Kapso (duplica organization.kapso_customer_id para ruteo directo).
+    kapsoCustomerId: text("kapso_customer_id").notNull(),
+    // Correlación del flujo pending (no hay phone_number_id al generar el link).
+    setupLinkId: text("setup_link_id"),
+    // Identificador rey de Kapso/Meta. Null mientras la conexión está pending.
+    phoneNumberId: text("phone_number_id"),
+    businessAccountId: text("business_account_id"),
+    displayPhoneNumber: text("display_phone_number"),
+    // Tipo elegido en el embedded signup: coexistence | dedicated.
+    connectionType: text("connection_type"),
+    status: text("status").notNull().default("pending"),
+    connectedAt: timestamp("connected_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // Un número no puede repetirse dentro de una organización. Los NULL (pending)
+    // se tratan como distintos en Postgres, así que no colisionan entre sí.
+    orgPhoneUnique: unique("whatsapp_connection_org_phone_unique").on(
+      t.organizationId,
+      t.phoneNumberId,
+    ),
+  }),
+);
+
+// Idempotencia de webhooks de Kapso (DB-backed: el Set en memoria no sirve en
+// serverless). Clave: X-Idempotency-Key del request.
+export const whatsappWebhookEvent = pgTable("whatsapp_webhook_event", {
+  id: text("id").primaryKey(),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  event: text("event").notNull(),
+  processedAt: timestamp("processed_at").notNull().defaultNow(),
+});
+
 export const schema = {
   user,
   session,
@@ -206,4 +255,6 @@ export const schema = {
   subscription,
   organizationEntitlementOverride,
   usageEvent,
+  whatsappConnection,
+  whatsappWebhookEvent,
 };

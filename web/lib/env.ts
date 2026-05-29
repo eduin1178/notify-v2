@@ -20,6 +20,12 @@ const envSchema = z.object({
     .email()
     .optional()
     .transform((v) => (v ? v.trim().toLowerCase() : undefined)),
+
+  // Kapso (BSP de WhatsApp). KAPSO_API_BASE_URL es el host, sin `/platform/v1`.
+  KAPSO_API_KEY: z.string().min(1),
+  KAPSO_API_BASE_URL: z.string().url().default("https://api.kapso.ai"),
+  // Secreto para verificar la firma HMAC SHA256 de los webhooks de Kapso.
+  KAPSO_WEBHOOK_SECRET: z.string().min(1),
 });
 
 const parsed = envSchema.safeParse(process.env);

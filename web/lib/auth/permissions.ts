@@ -22,7 +22,8 @@ export type Action =
   | "org.members.changeRole"
   | "org.members.remove"
   | "org.leave"
-  | "org.content.view";
+  | "org.content.view"
+  | "org.whatsapp.connect";
 
 export function can(actor: Actor, action: Action, target: Target = { kind: "org" }): boolean {
   if (actor.isSuperAdmin && target.kind !== "member") return true;
@@ -42,6 +43,10 @@ export function can(actor: Actor, action: Action, target: Target = { kind: "org"
       return role === "owner";
 
     case "org.editSettings":
+      return role === "owner" || role === "admin";
+
+    case "org.whatsapp.connect":
+      // Conectar/desconectar/reconectar cuentas de WhatsApp: solo owner/admin.
       return role === "owner" || role === "admin";
 
     case "org.members.view":
