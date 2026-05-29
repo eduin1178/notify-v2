@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "automate-whatsapp": {
+      "source": "gokapso/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/automate-whatsapp/SKILL.md",
+      "computedHash": "e4fa7890c50ea49151975c4789ac6041432dde71a22557a9691f48dc4f85d515"
+    },
+    "integrate-whatsapp": {
+      "source": "gokapso/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/integrate-whatsapp/SKILL.md",
+      "computedHash": "19ffa31509b2efd06080b1321fc5b2ec4a99825d4eceb3c9c8b17f41c79b03d5"
+    },
+    "observe-whatsapp": {
+      "source": "gokapso/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/observe-whatsapp/SKILL.md",
+      "computedHash": "6e30fd2603665b23a4f5e4362d3c1ea8aae4dd239f4d5becdc2f70d8355aaa69"
+    }
+  }
+}
