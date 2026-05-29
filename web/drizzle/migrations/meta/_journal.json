@@ -8,6 +8,13 @@
       "when": 1779774785564,
       "tag": "0000_natural_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780009687564,
+      "tag": "0001_goofy_lady_vermin",
+      "breakpoints": true
     }
   ]
 }
