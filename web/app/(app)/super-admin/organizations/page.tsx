@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { count, desc, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
@@ -67,7 +68,14 @@ export default async function SuperAdminOrganizationsPage({
           <tbody className="divide-y divide-border">
             {enriched.map((org) => (
               <tr key={org.id}>
-                <td className="px-4 py-2 font-medium">{org.name}</td>
+                <td className="px-4 py-2 font-medium">
+                  <Link
+                    href={`/super-admin/organizations/${org.id}`}
+                    className="hover:underline"
+                  >
+                    {org.name}
+                  </Link>
+                </td>
                 <td className="px-4 py-2 text-muted-foreground">{org.slug}</td>
                 <td className="px-4 py-2">{org.members}</td>
                 <td className="px-4 py-2 text-muted-foreground">

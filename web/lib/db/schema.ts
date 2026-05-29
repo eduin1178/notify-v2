@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  integer,
+  numeric,
+  unique,
+} from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -95,6 +103,96 @@ export const invitation = pgTable("invitation", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ── Billing seam ──────────────────────────────────────────────────────────
+// Catálogo de planes y costura de entitlements/uso. NO incluye pasarela de
+// pago ni cobro: precios se almacenan como dato, el cobro lo añade el engine.
+
+export const plan = pgTable("plan", {
+  id: text("id").primaryKey(),
+  // Clave estable del plan: trial | basic | plus | pro
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  // Precio mensual en USD. Almacenado, no cobrado en esta versión.
+  priceUsd: numeric("price_usd", { precision: 10, scale: 4 }).notNull().default("0"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Valor de un entitlement key para un plan. El `kind` del key vive en código
+// (lib/services/billing/entitlements.ts); aquí solo se persiste el valor.
+// int_value NULL en un key contable/medido representa "ilimitado".
+export const planEntitlement = pgTable(
+  "plan_entitlement",
+  {
+    id: text("id").primaryKey(),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => plan.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    intValue: integer("int_value"),
+    boolValue: boolean("bool_value"),
+  },
+  (t) => ({
+    planKeyUnique: unique("plan_entitlement_plan_key_unique").on(t.planId, t.key),
+  }),
+);
+
+// Suscripción de una organización a un plan. Fuente única de verdad del plan.
+// Campos de ciclo/proveedor quedan modelados para el engine (sin uso en v0).
+export const subscription = pgTable("subscription", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .unique()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  planId: text("plan_id")
+    .notNull()
+    .references(() => plan.id, { onDelete: "restrict" }),
+  status: text("status").notNull().default("trialing"),
+  assignedAt: timestamp("assigned_at").notNull().defaultNow(),
+  currentPeriodStart: timestamp("current_period_start"),
+  currentPeriodEnd: timestamp("current_period_end"),
+  provider: text("provider"),
+  providerRef: text("provider_ref"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Override de límite por organización. Prevalece sobre el valor del plan.
+export const organizationEntitlementOverride = pgTable(
+  "organization_entitlement_override",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    intValue: integer("int_value"),
+    boolValue: boolean("bool_value"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orgKeyUnique: unique("org_entitlement_override_org_key_unique").on(
+      t.organizationId,
+      t.key,
+    ),
+  }),
+);
+
+// Ledger de uso. Definido ahora; lo puebla la feature de Envío (change ②).
+export const usageEvent = pgTable("usage_event", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  metric: text("metric").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+});
+
 export const schema = {
   user,
   session,
@@ -103,4 +201,9 @@ export const schema = {
   organization,
   member,
   invitation,
+  plan,
+  planEntitlement,
+  subscription,
+  organizationEntitlementOverride,
+  usageEvent,
 };

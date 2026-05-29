@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { admin, organization } from "better-auth/plugins";
@@ -7,6 +8,19 @@ import { db } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
 import { env } from "@/lib/env";
 import { sendInvitationEmail } from "@/lib/email/send-invitation";
+import { ensureTrialSubscription } from "@/lib/services/billing/provisioning";
+import { seatDecision } from "@/lib/services/billing/seats";
+
+/**
+ * Enforcement del entitlement `seats` en los hooks de membresía. Lanza un
+ * APIError 403 si la organización alcanzó su límite de asientos del plan.
+ */
+async function assertSeatAvailable(organizationId: string): Promise<void> {
+  const decision = await seatDecision(db, organizationId, 1);
+  if (!decision.allowed) {
+    throw new APIError("FORBIDDEN", { message: decision.reason });
+  }
+}
 
 const INVITATION_TTL_DAYS = 7;
 const INVITATION_TTL_SECONDS = INVITATION_TTL_DAYS * 24 * 60 * 60;
@@ -107,6 +121,22 @@ export const auth = betterAuth({
           fields: {
             status: "status",
           },
+        },
+      },
+      organizationHooks: {
+        // Toda organización nueva nace en plan Trial (costura de billing).
+        afterCreateOrganization: async ({ organization: createdOrg }) => {
+          await ensureTrialSubscription(db, createdOrg.id);
+        },
+        // Enforcement de `seats`: cualquier alta de miembro pasa por autorización.
+        beforeCreateInvitation: async ({ invitation }) => {
+          await assertSeatAvailable(invitation.organizationId);
+        },
+        beforeAddMember: async ({ member }) => {
+          await assertSeatAvailable(member.organizationId);
+        },
+        beforeAcceptInvitation: async ({ invitation }) => {
+          await assertSeatAvailable(invitation.organizationId);
         },
       },
       invitationExpiresIn: INVITATION_TTL_SECONDS,

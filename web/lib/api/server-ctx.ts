@@ -8,11 +8,17 @@
  * Reflejo del bridge equivalente para Hono: `web/lib/api/build-ctx.ts`.
  */
 
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/client";
-import type { ServiceContext } from "@/lib/services/context";
+import { schema } from "@/lib/db/schema";
+import {
+  makeEntitlementsPort,
+  makeUsagePort,
+} from "@/lib/services/billing/adapter";
+import type { ServiceContext, TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import { consoleLogger } from "@/lib/services/logger";
 
@@ -34,5 +40,39 @@ export async function buildServerServiceContext(): Promise<ServiceContext> {
       role: (session.user as { role?: string | null }).role ?? null,
     },
     logger: consoleLogger,
+  };
+}
+
+/**
+ * Puente Next → contexto tenant-scoped. Carga la organización por id y adjunta
+ * la costura de billing (`entitlements`/`usage`). Espejo de `buildTenantServiceContext`
+ * de Hono. El `organizationId` debe resolverlo el llamante (p. ej. vía
+ * `requireActiveOrganization()` en `lib/auth/guards.ts`).
+ */
+export async function buildServerTenantServiceContext(
+  organizationId: string,
+): Promise<TenantServiceContext> {
+  const ctx = await buildServerServiceContext();
+
+  const orgRow = await db
+    .select({
+      id: schema.organization.id,
+      name: schema.organization.name,
+      slug: schema.organization.slug,
+    })
+    .from(schema.organization)
+    .where(eq(schema.organization.id, organizationId))
+    .limit(1);
+
+  const org = orgRow[0];
+  if (!org) {
+    throw DomainErrors.notFound("Organización no encontrada.");
+  }
+
+  return {
+    ...ctx,
+    currentOrg: org,
+    entitlements: makeEntitlementsPort(db, org.id),
+    usage: makeUsagePort(db, org.id),
   };
 }

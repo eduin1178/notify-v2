@@ -2,6 +2,10 @@ import type { Context } from "hono";
 
 import type { HonoEnv } from "@/lib/api/context";
 import { db } from "@/lib/db/client";
+import {
+  makeEntitlementsPort,
+  makeUsagePort,
+} from "@/lib/services/billing/adapter";
 import type { ServiceContext, TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import { consoleLogger } from "@/lib/services/logger";
@@ -26,5 +30,11 @@ export function buildTenantServiceContext(
   if (!ctx.currentOrg) {
     throw DomainErrors.forbidden("Organización requerida.");
   }
-  return ctx as TenantServiceContext;
+  const organizationId = ctx.currentOrg.id;
+  return {
+    ...ctx,
+    currentOrg: ctx.currentOrg,
+    entitlements: makeEntitlementsPort(db, organizationId),
+    usage: makeUsagePort(db, organizationId),
+  };
 }

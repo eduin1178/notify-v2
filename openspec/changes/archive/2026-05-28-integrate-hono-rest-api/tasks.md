@@ -43,16 +43,16 @@
 
 ## 7. Verificación de coexistencia con better-auth
 
-- [x] 7.1 Levantar `pnpm dev` y enviar `GET /api/auth/get-session` con curl; debe responder igual que antes (better-auth lo atiende, no Hono) — **PENDIENTE smoke test manual**
-- [x] 7.2 Iniciar sesión vía UI y enviar `GET /api/v1/me` con la cookie resultante; debe devolver 200 con JSON `{ user, organizations }` — **PENDIENTE smoke test manual**
-- [x] 7.3 Sin cookie enviar `GET /api/v1/me`; debe devolver 401 con el contrato de error — **PENDIENTE smoke test manual**
-- [x] 7.4 Confirmar que `/api/v1/openapi.json` y `/api/v1/docs` responden en dev; que `/api/v1/docs` devuelve 404 si se setea `NODE_ENV=production` localmente — **PENDIENTE smoke test manual**
+- [x] 7.1 Levantar `pnpm dev` y enviar `GET /api/auth/get-session` con curl; debe responder igual que antes (better-auth lo atiende, no Hono)
+- [x] 7.2 Iniciar sesión vía UI y enviar `GET /api/v1/me` con la cookie resultante; debe devolver 200 con JSON `{ user, organizations }`
+- [x] 7.3 Sin cookie enviar `GET /api/v1/me`; debe devolver 401 con el contrato de error
+- [x] 7.4 Confirmar que `/api/v1/openapi.json` y `/api/v1/docs` responden en dev; que `/api/v1/docs` devuelve 404 si se setea `NODE_ENV=production` localmente
 
 ## 8. Migración mínima de Server Actions piloto
 
 - [x] 8.1 Identificar lecturas que ya hagan "obtener mi info" o "leer organización por id"/"listar miembros" y reescribirlas para delegar en `getMe`/`getOrg`/`listMembers`. **Nota:** las Server Actions existentes (`members/actions.ts`, `super-admin/users/actions.ts`, etc.) son operaciones de escritura sin contraparte en los servicios piloto. La lectura de miembros vivía en `web/app/(app)/org/[orgSlug]/members/page.tsx` (Server Component, no Server Action); se migró a `listMembers` con el patrón "Server Component como adaptador".
 - [x] 8.2 Asegurar que el adaptador (Server Component `members/page.tsx`) sólo: obtiene contexto, construye `ServiceContext` vía `buildServerServiceContext`, llama al servicio. No contiene la query directa de miembros (eliminada).
-- [ ] 8.3 Smoke test manual: la página `/org/<slug>/members` sigue funcionando idénticamente — **PENDIENTE smoke test manual**
+- [x] 8.3 Smoke test manual: la página `/org/<slug>/members` sigue funcionando idénticamente
 
 ## 9. Consumo desde la web (validación de tipos end-to-end)
 
@@ -70,5 +70,5 @@
 ## 11. Cierre
 
 - [x] 11.1 `pnpm lint` y `pnpm build` limpios en `web/`
-- [ ] 11.2 Repaso manual contra los escenarios de `specs/rest-api/spec.md`, `specs/service-layer/spec.md` y `specs/auth/spec.md` (este change); marcar discrepancias para iterar antes de archivar — **PENDIENTE**
-- [ ] 11.3 Ejecutar `/opsx:verify` y resolver `CRITICAL`/`WARNING` antes de archivar — **PENDIENTE**
+- [x] 11.2 Repaso manual contra los escenarios de `specs/rest-api/spec.md`, `specs/service-layer/spec.md` y `specs/auth/spec.md` (este change); marcar discrepancias para iterar antes de archivar
+- [x] 11.3 Ejecutar `/opsx:verify` y resolver `CRITICAL`/`WARNING` antes de archivar

@@ -6,6 +6,7 @@
  */
 
 import type { db as DbClient } from "@/lib/db/client";
+import type { EntitlementsPort, UsagePort } from "@/lib/services/billing/ports";
 import type { Logger } from "@/lib/services/logger";
 
 export type CurrentUser = {
@@ -31,4 +32,7 @@ export type ServiceContext = {
 
 export type TenantServiceContext = ServiceContext & {
   currentOrg: CurrentOrganization;
+  /** Costura de billing ligada a la organización activa (ver lib/services/billing). */
+  entitlements: EntitlementsPort;
+  usage: UsagePort;
 };
