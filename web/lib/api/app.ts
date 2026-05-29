@@ -7,7 +7,18 @@ import { v1Router } from "@/lib/api/routes/v1";
 
 const isProduction = process.env.NODE_ENV === "production";
 
-export const app = new OpenAPIHono<HonoEnv>({ strict: false })
+export const app = new OpenAPIHono<HonoEnv>({
+  strict: false,
+  // Sin este hook, @hono/zod-openapi responde input inválido con su forma por
+  // defecto `{ success, error }`. Lanzamos el ZodError para que el handler
+  // global (lib/api/errors.ts) lo traduzca al contrato único
+  // `{ error: { code: "validation_error", issues } }`.
+  defaultHook: (result) => {
+    if (!result.success) {
+      throw result.error;
+    }
+  },
+})
   .basePath("/api")
   .route("/v1", v1Router);
 
