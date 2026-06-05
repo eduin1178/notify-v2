@@ -36,6 +36,13 @@
       "when": 1780640042875,
       "tag": "0004_parched_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780643660683,
+      "tag": "0005_fixed_big_bertha",
+      "breakpoints": true
     }
   ]
 }

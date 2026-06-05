@@ -246,6 +246,40 @@ export const whatsappWebhookEvent = pgTable("whatsapp_webhook_event", {
   processedAt: timestamp("processed_at").notNull().defaultNow(),
 });
 
+// ── Contacts ────────────────────────────────────────────────────────────────
+// Contactos de una organización (multi-tenant). El teléfono es la identidad:
+// único por organización y normalizado a E.164. `last_name` es nullable a
+// propósito — la importación desde WhatsApp solo trae un nombre (profile_name);
+// la obligatoriedad de apellido se valida únicamente en el formulario manual.
+// `source`: manual | csv | whatsapp (procedencia del registro).
+export const contact = pgTable(
+  "contact",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name"),
+    phone: text("phone").notNull(),
+    email: text("email"),
+    address: text("address"),
+    city: text("city"),
+    company: text("company"),
+    source: text("source").notNull().default("manual"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // El teléfono identifica al contacto dentro de la organización. La unicidad
+    // es por organización: el mismo número puede existir en orgs distintas.
+    orgPhoneUnique: unique("contact_org_phone_unique").on(
+      t.organizationId,
+      t.phone,
+    ),
+  }),
+);
+
 export const schema = {
   user,
   session,
@@ -261,4 +295,5 @@ export const schema = {
   usageEvent,
   whatsappConnection,
   whatsappWebhookEvent,
+  contact,
 };

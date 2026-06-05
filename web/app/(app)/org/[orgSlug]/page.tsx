@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 
+import { buildServerTenantServiceContext } from "@/lib/api/server-ctx";
 import { loadOrgContext } from "@/lib/org/context";
+import { countContacts } from "@/lib/services/contacts/service";
 import { db } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
 
@@ -17,6 +19,9 @@ export default async function OrgDashboardPage({
     .select({ id: schema.member.id })
     .from(schema.member)
     .where(eq(schema.member.organizationId, ctx.organization.id));
+
+  const svc = await buildServerTenantServiceContext(ctx.organization.id);
+  const contactCount = await countContacts(svc);
 
   return (
     <section className="space-y-6">
@@ -41,6 +46,18 @@ export default async function OrgDashboardPage({
             className="mt-3 inline-block text-sm text-muted-foreground hover:text-foreground"
           >
             Gestionar miembros →
+          </Link>
+        </div>
+        <div className="border border-border bg-card p-4 text-card-foreground">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            Contactos
+          </p>
+          <p className="mt-2 text-2xl font-semibold">{contactCount}</p>
+          <Link
+            href={`/org/${ctx.organization.slug}/contacts`}
+            className="mt-3 inline-block text-sm text-muted-foreground hover:text-foreground"
+          >
+            Gestionar contactos →
           </Link>
         </div>
         <div className="border border-border bg-card p-4 text-card-foreground">

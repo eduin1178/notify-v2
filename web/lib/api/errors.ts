@@ -17,7 +17,7 @@ export function onError(err: Error, c: Context) {
     const body: ApiErrorBody = {
       error: { code: err.code, message: err.message },
     };
-    return c.json(body, err.status as 400 | 401 | 403 | 404 | 409 | 500);
+    return c.json(body, err.status as 400 | 401 | 403 | 404 | 409 | 422 | 500);
   }
 
   if (err instanceof ZodError) {

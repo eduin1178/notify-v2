@@ -39,4 +39,6 @@ export const DomainErrors = {
     new DomainError({ code: "not_found", status: 404, message }),
   conflict: (message = "Conflicto.") =>
     new DomainError({ code: "conflict", status: 409, message }),
+  validation: (message = "Solicitud inválida.") =>
+    new DomainError({ code: "validation_error", status: 422, message }),
 };

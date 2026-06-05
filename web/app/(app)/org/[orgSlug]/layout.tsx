@@ -1,5 +1,9 @@
 import { eq } from "drizzle-orm";
-import { UsersIcon, WhatsappLogoIcon } from "@phosphor-icons/react/dist/ssr";
+import {
+  AddressBookIcon,
+  UsersIcon,
+  WhatsappLogoIcon,
+} from "@phosphor-icons/react/dist/ssr";
 
 import { loadOrgContext } from "@/lib/org/context";
 import { db } from "@/lib/db/client";
@@ -31,6 +35,11 @@ export default async function OrgLayout({
       title: "Miembros",
       url: `/org/${ctx.organization.slug}/members`,
       icon: <UsersIcon />,
+    },
+    {
+      title: "Contactos",
+      url: `/org/${ctx.organization.slug}/contacts`,
+      icon: <AddressBookIcon />,
     },
     {
       title: "WhatsApp",
