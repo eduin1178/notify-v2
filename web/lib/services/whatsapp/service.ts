@@ -18,13 +18,18 @@ import {
   createCustomer,
   createSetupLink,
   deletePhoneNumber,
+  getPhoneNumber,
   KapsoApiError,
+  listPhoneNumbers,
   type KapsoConnectionType,
+  type KapsoPhoneNumber,
+  type KapsoSetupLink,
 } from "@/lib/integrations/kapso/client";
 import type { TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import type { Logger } from "@/lib/services/logger";
 import type {
+  ImportablePhoneNumbersResponseT,
   SetupLinkResponseT,
   WhatsappConnectionDtoT,
   WhatsappConnectionsResponseT,
@@ -76,6 +81,7 @@ function normalizeType(
 function toDto(row: ConnectionRow): WhatsappConnectionDtoT {
   return {
     id: row.id,
+    name: row.name,
     status: normalizeStatus(row.status),
     phoneNumberId: row.phoneNumberId,
     displayPhoneNumber: row.displayPhoneNumber,
@@ -132,6 +138,37 @@ async function loadConnection(
   return rows[0];
 }
 
+/**
+ * ¿El error es el 404 "Customer not found" de Kapso? Indica que el
+ * `kapsoCustomerId` persistido quedó huérfano (customer borrado en Kapso o
+ * creado en otra cuenta/entorno). Se recupera recreando el customer.
+ */
+function isCustomerNotFound(err: unknown): boolean {
+  return (
+    err instanceof KapsoApiError &&
+    err.status === 404 &&
+    err.body.includes("Customer not found")
+  );
+}
+
+/** Crea un customer nuevo en Kapso y lo persiste en la organización. */
+async function createAndPersistKapsoCustomer(
+  ctx: TenantServiceContext,
+): Promise<string> {
+  const org = ctx.currentOrg;
+  const customer = await createCustomer({
+    externalCustomerId: org.id,
+    name: org.name,
+  });
+
+  await ctx.db
+    .update(schema.organization)
+    .set({ kapsoCustomerId: customer.id })
+    .where(eq(schema.organization.id, org.id));
+
+  return customer.id;
+}
+
 /** Crea (perezosamente) el customer de Kapso y lo persiste en la organización. */
 async function ensureKapsoCustomer(ctx: TenantServiceContext): Promise<string> {
   const org = ctx.currentOrg;
@@ -144,17 +181,30 @@ async function ensureKapsoCustomer(ctx: TenantServiceContext): Promise<string> {
   const existing = row[0]?.kapsoCustomerId;
   if (existing) return existing;
 
-  const customer = await createCustomer({
-    externalCustomerId: org.id,
-    name: org.name,
-  });
+  return createAndPersistKapsoCustomer(ctx);
+}
 
-  await ctx.db
-    .update(schema.organization)
-    .set({ kapsoCustomerId: customer.id })
-    .where(eq(schema.organization.id, org.id));
-
-  return customer.id;
+/**
+ * Genera un setup link tolerando un `kapsoCustomerId` huérfano: si Kapso
+ * responde 404 "Customer not found", recrea el customer (lo persiste en la org)
+ * y reintenta UNA vez. Devuelve el `customerId` efectivamente usado para que el
+ * llamador lo persista en la conexión.
+ */
+async function setupLinkWithSelfHeal(
+  ctx: TenantServiceContext,
+  kapsoCustomerId: string,
+): Promise<{ customerId: string; link: KapsoSetupLink }> {
+  try {
+    return { customerId: kapsoCustomerId, link: await generateConnectSetupLink(kapsoCustomerId) };
+  } catch (err) {
+    if (!isCustomerNotFound(err)) throw err;
+    ctx.logger.warn("[whatsapp] customer de Kapso huérfano; recreando", {
+      kapsoCustomerId,
+      organizationId: ctx.currentOrg.id,
+    });
+    const freshId = await createAndPersistKapsoCustomer(ctx);
+    return { customerId: freshId, link: await generateConnectSetupLink(freshId) };
+  }
 }
 
 async function countConnectionsTowardLimit(
@@ -214,10 +264,10 @@ export async function connectWhatsApp(
     .limit(1);
 
   if (pending[0]) {
-    const link = await generateConnectSetupLink(kapsoCustomerId);
+    const { customerId, link } = await setupLinkWithSelfHeal(ctx, kapsoCustomerId);
     await ctx.db
       .update(schema.whatsappConnection)
-      .set({ setupLinkId: link.id, updatedAt: new Date() })
+      .set({ kapsoCustomerId: customerId, setupLinkId: link.id, updatedAt: new Date() })
       .where(eq(schema.whatsappConnection.id, pending[0].id));
     return {
       connectionId: pending[0].id,
@@ -238,12 +288,12 @@ export async function connectWhatsApp(
     throw DomainErrors.forbidden(decision.reason);
   }
 
-  const link = await generateConnectSetupLink(kapsoCustomerId);
+  const { customerId, link } = await setupLinkWithSelfHeal(ctx, kapsoCustomerId);
   const id = crypto.randomUUID();
   await ctx.db.insert(schema.whatsappConnection).values({
     id,
     organizationId: ctx.currentOrg.id,
-    kapsoCustomerId,
+    kapsoCustomerId: customerId,
     setupLinkId: link.id,
     status: "pending",
   });
@@ -275,6 +325,268 @@ export async function getConnection(
 ): Promise<WhatsappConnectionDtoT> {
   const row = await loadConnection(ctx, id);
   return toDto(row);
+}
+
+/** Mapea `is_coexistence` de Kapso al tipo de conexión de Notify. */
+function connectionTypeFromKapso(
+  isCoexistence: boolean | null,
+): "coexistence" | "dedicated" | null {
+  if (isCoexistence === true) return "coexistence";
+  if (isCoexistence === false) return "dedicated";
+  return null;
+}
+
+/** Nombre preferido que provee Kapso (verified → display → label de Kapso). */
+function kapsoConnectionName(n: KapsoPhoneNumber): string | null {
+  return n.verifiedName ?? n.displayName ?? n.name ?? null;
+}
+
+/**
+ * Nombre por defecto numerado ("WhatsApp #N") para cuando no hay nombre de
+ * Kapso. N = cantidad de conexiones de la org + 1 (excluyendo la fila que se
+ * está nombrando, si ya existe). Es solo un placeholder editable.
+ */
+async function nextConnectionName(
+  db: Db,
+  organizationId: string,
+  excludeId?: string,
+): Promise<string> {
+  const rows = await db
+    .select({ id: schema.whatsappConnection.id })
+    .from(schema.whatsappConnection)
+    .where(eq(schema.whatsappConnection.organizationId, organizationId));
+  const others = excludeId
+    ? rows.filter((r) => r.id !== excludeId).length
+    : rows.length;
+  return `WhatsApp #${others + 1}`;
+}
+
+/** Lee el `kapsoCustomerId` persistido en la organización (null si no hay). */
+async function getOrgKapsoCustomerId(
+  ctx: TenantServiceContext,
+): Promise<string | null> {
+  const row = await ctx.db
+    .select({ kapsoCustomerId: schema.organization.kapsoCustomerId })
+    .from(schema.organization)
+    .where(eq(schema.organization.id, ctx.currentOrg.id))
+    .limit(1);
+  return row[0]?.kapsoCustomerId ?? null;
+}
+
+/**
+ * Lista números que existen en Kapso (bajo el customer de la org) pero que aún
+ * NO están en Notify. Es la base de la reconciliación manual cuando el webhook
+ * `whatsapp.phone_number.created` no llegó. Solo owner/admin.
+ *
+ * La frontera de tenant es el `customer_id` de Kapso: solo se listan números de
+ * ESTE customer, nunca de otra organización.
+ */
+export async function listImportablePhoneNumbers(
+  ctx: TenantServiceContext,
+): Promise<ImportablePhoneNumbersResponseT> {
+  await assertCanManage(ctx);
+
+  const kapsoCustomerId = await getOrgKapsoCustomerId(ctx);
+  if (!kapsoCustomerId) return { numbers: [] };
+
+  const kapsoNumbers = await listPhoneNumbers(kapsoCustomerId);
+
+  // Números que la org ya tiene registrados en Notify (cualquier estado).
+  const existingRows = await ctx.db
+    .select({ phoneNumberId: schema.whatsappConnection.phoneNumberId })
+    .from(schema.whatsappConnection)
+    .where(eq(schema.whatsappConnection.organizationId, ctx.currentOrg.id));
+  const alreadyInNotify = new Set(
+    existingRows.map((r) => r.phoneNumberId).filter((v): v is string => !!v),
+  );
+
+  const numbers = kapsoNumbers
+    .filter((n) => !alreadyInNotify.has(n.phoneNumberId))
+    .map((n) => ({
+      phoneNumberId: n.phoneNumberId,
+      name: kapsoConnectionName(n),
+      displayPhoneNumber: n.displayPhoneNumber,
+      businessAccountId: n.businessAccountId,
+      connectionType: connectionTypeFromKapso(n.isCoexistence),
+      status: n.status,
+    }));
+
+  return { numbers };
+}
+
+/**
+ * Importa a Notify un número que YA existe en Kapso, sin pasar por el setup link.
+ * Reconciliación manual para cuando el webhook de creación no llegó. Solo
+ * owner/admin. Aplica el gating `whatsapp_numbers` (importar compromete un
+ * número real, igual que conectar uno nuevo) y verifica que el número pertenezca
+ * al customer de la org (frontera de tenant).
+ *
+ * Idempotente: si el número ya está `connected` en Notify, lo devuelve sin tocar
+ * nada. Reusa el `pending` correlacionado si existe, igual que el webhook.
+ */
+export async function importPhoneNumber(
+  ctx: TenantServiceContext,
+  phoneNumberId: string,
+): Promise<WhatsappConnectionDtoT> {
+  await assertCanManage(ctx);
+
+  const kapsoCustomerId = await getOrgKapsoCustomerId(ctx);
+  if (!kapsoCustomerId) {
+    throw DomainErrors.conflict(
+      "La organización aún no tiene una cuenta de Kapso. Usa Conectar primero.",
+    );
+  }
+
+  // Fuente de verdad: el número en Kapso. Valida existencia y pertenencia.
+  let kapsoNumber: KapsoPhoneNumber;
+  try {
+    kapsoNumber = await getPhoneNumber(phoneNumberId);
+  } catch (err) {
+    if (err instanceof KapsoApiError && err.status === 404) {
+      throw DomainErrors.notFound("El número no existe en Kapso.");
+    }
+    throw err;
+  }
+
+  if (kapsoNumber.customerId !== kapsoCustomerId) {
+    throw DomainErrors.forbidden(
+      "Ese número no pertenece a esta organización.",
+    );
+  }
+
+  const details = {
+    phoneNumberId: kapsoNumber.phoneNumberId,
+    businessAccountId: kapsoNumber.businessAccountId,
+    displayPhoneNumber: kapsoNumber.displayPhoneNumber,
+    connectionType: connectionTypeFromKapso(kapsoNumber.isCoexistence),
+  };
+
+  // ¿Ya existe una conexión con este número en Notify?
+  const existing = await ctx.db
+    .select()
+    .from(schema.whatsappConnection)
+    .where(
+      and(
+        eq(schema.whatsappConnection.organizationId, ctx.currentOrg.id),
+        eq(schema.whatsappConnection.phoneNumberId, kapsoNumber.phoneNumberId),
+      ),
+    )
+    .limit(1);
+
+  if (existing[0]?.status === "connected") return toDto(existing[0]); // idempotente
+
+  // Gating: solo si el número aún NO cuenta contra el cupo (un connected/
+  // needs_reconnect ya lo hace; pending/disconnected/failed/nuevo, no).
+  const alreadyCounted =
+    existing[0] != null &&
+    (COUNTED_STATUSES as readonly string[]).includes(existing[0].status);
+  if (!alreadyCounted) {
+    const current = await countConnectionsTowardLimit(ctx);
+    const decision = await ctx.entitlements.authorize({
+      key: "whatsapp_numbers",
+      current,
+      delta: 1,
+    });
+    if (!decision.allowed) throw DomainErrors.forbidden(decision.reason);
+  }
+
+  // Caso 1: existe una fila para este número → consolidarla a connected.
+  if (existing[0]) {
+    const name =
+      existing[0].name ?? // respeta un nombre custom ya puesto por el usuario
+      kapsoConnectionName(kapsoNumber) ??
+      (await nextConnectionName(ctx.db, ctx.currentOrg.id, existing[0].id));
+    const updated = await ctx.db
+      .update(schema.whatsappConnection)
+      .set({
+        ...details,
+        name,
+        status: "connected",
+        connectedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.whatsappConnection.id, existing[0].id))
+      .returning();
+    return toDto(updated[0]);
+  }
+
+  // Caso 2: promover el pending más reciente del customer (igual que el webhook).
+  const pending = await ctx.db
+    .select()
+    .from(schema.whatsappConnection)
+    .where(
+      and(
+        eq(schema.whatsappConnection.organizationId, ctx.currentOrg.id),
+        eq(schema.whatsappConnection.kapsoCustomerId, kapsoCustomerId),
+        eq(schema.whatsappConnection.status, "pending"),
+      ),
+    )
+    .orderBy(desc(schema.whatsappConnection.createdAt))
+    .limit(1);
+
+  if (pending[0]) {
+    const name =
+      kapsoConnectionName(kapsoNumber) ??
+      (await nextConnectionName(ctx.db, ctx.currentOrg.id, pending[0].id));
+    const updated = await ctx.db
+      .update(schema.whatsappConnection)
+      .set({
+        ...details,
+        name,
+        status: "connected",
+        connectedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.whatsappConnection.id, pending[0].id))
+      .returning();
+    return toDto(updated[0]);
+  }
+
+  // Caso 3: no había rastro en Notify → insertar la conexión consolidada.
+  const name =
+    kapsoConnectionName(kapsoNumber) ??
+    (await nextConnectionName(ctx.db, ctx.currentOrg.id));
+  const inserted = await ctx.db
+    .insert(schema.whatsappConnection)
+    .values({
+      id: crypto.randomUUID(),
+      organizationId: ctx.currentOrg.id,
+      kapsoCustomerId,
+      ...details,
+      name,
+      status: "connected",
+      connectedAt: new Date(),
+    })
+    .returning();
+  return toDto(inserted[0]);
+}
+
+/** Renombra una conexión (etiqueta editable). Solo owner/admin. */
+export async function renameConnection(
+  ctx: TenantServiceContext,
+  id: string,
+  name: string,
+): Promise<WhatsappConnectionDtoT> {
+  await assertCanManage(ctx);
+  await loadConnection(ctx, id); // valida pertenencia a la org
+
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw DomainErrors.conflict("El nombre no puede estar vacío.");
+  }
+
+  const updated = await ctx.db
+    .update(schema.whatsappConnection)
+    .set({ name: trimmed, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.whatsappConnection.id, id),
+        eq(schema.whatsappConnection.organizationId, ctx.currentOrg.id),
+      ),
+    )
+    .returning();
+
+  return toDto(updated[0]);
 }
 
 /**
@@ -414,6 +726,9 @@ export async function applyPhoneNumberCreated(
           input.businessAccountId ?? existing[0].businessAccountId,
         displayPhoneNumber:
           input.displayPhoneNumber ?? existing[0].displayPhoneNumber,
+        name:
+          existing[0].name ??
+          (await nextConnectionName(deps.db, org.id, existing[0].id)),
       })
       .where(eq(schema.whatsappConnection.id, existing[0].id));
     return;
@@ -443,6 +758,9 @@ export async function applyPhoneNumberCreated(
         displayPhoneNumber: input.displayPhoneNumber ?? null,
         connectedAt: new Date(),
         updatedAt: new Date(),
+        name:
+          pending[0].name ??
+          (await nextConnectionName(deps.db, org.id, pending[0].id)),
       })
       .where(eq(schema.whatsappConnection.id, pending[0].id));
     return;
@@ -456,6 +774,7 @@ export async function applyPhoneNumberCreated(
     phoneNumberId: input.phoneNumberId,
     businessAccountId: input.businessAccountId ?? null,
     displayPhoneNumber: input.displayPhoneNumber ?? null,
+    name: await nextConnectionName(deps.db, org.id),
     status: "connected",
     connectedAt: new Date(),
   });

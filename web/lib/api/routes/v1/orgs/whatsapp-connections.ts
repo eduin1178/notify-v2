@@ -7,6 +7,9 @@ import { requireOrgMembership } from "@/lib/api/middlewares/org";
 import { OrgIdParam } from "@/lib/services/orgs/schemas";
 import {
   ConnectionIdParam,
+  ImportablePhoneNumbersResponse,
+  ImportPhoneNumberInput,
+  RenameConnectionInput,
   SetupLinkResponse,
   WhatsappConnectionDto,
   WhatsappConnectionsResponse,
@@ -15,8 +18,11 @@ import {
   connectWhatsApp,
   disconnect,
   getConnection,
+  importPhoneNumber,
   listConnections,
+  listImportablePhoneNumbers,
   reconnect,
+  renameConnection,
 } from "@/lib/services/whatsapp/service";
 
 const ConnectionItemParam = OrgIdParam.merge(ConnectionIdParam);
@@ -76,6 +82,67 @@ const getRoute = createRoute({
   },
 });
 
+const listImportableRoute = createRoute({
+  method: "get",
+  path: "/orgs/{orgId}/whatsapp/connections/importable",
+  tags: TAGS,
+  summary: "Listar números existentes en Kapso aún no agregados a Notify",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: { params: OrgIdParam },
+  responses: {
+    200: {
+      description: "Números importables (del customer de la organización).",
+      content: {
+        "application/json": { schema: ImportablePhoneNumbersResponse },
+      },
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
+const importRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/whatsapp/connections/import",
+  tags: TAGS,
+  summary: "Importar un número existente de Kapso a Notify (reconciliación)",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: OrgIdParam,
+    body: {
+      content: { "application/json": { schema: ImportPhoneNumberInput } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Número importado; conexión en estado connected.",
+      content: { "application/json": { schema: WhatsappConnectionDto } },
+    },
+    409: { description: "La organización aún no tiene cuenta de Kapso." },
+    ...COMMON_ERRORS,
+  },
+});
+
+const renameRoute = createRoute({
+  method: "patch",
+  path: "/orgs/{orgId}/whatsapp/connections/{id}",
+  tags: TAGS,
+  summary: "Renombrar una conexión de WhatsApp",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: ConnectionItemParam,
+    body: {
+      content: { "application/json": { schema: RenameConnectionInput } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Conexión renombrada.",
+      content: { "application/json": { schema: WhatsappConnectionDto } },
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
 const disconnectRoute = createRoute({
   method: "delete",
   path: "/orgs/{orgId}/whatsapp/connections/{id}",
@@ -120,10 +187,29 @@ export const whatsappConnectionsRouter = new OpenAPIHono<HonoEnv>()
     const result = await listConnections(ctx);
     return c.json(result, 200);
   })
+  // Antes de getRoute: "importable" no debe capturarse como :id.
+  .openapi(listImportableRoute, async (c) => {
+    const ctx = buildTenantServiceContext(c);
+    const result = await listImportablePhoneNumbers(ctx);
+    return c.json(result, 200);
+  })
+  .openapi(importRoute, async (c) => {
+    const { phoneNumberId } = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await importPhoneNumber(ctx, phoneNumberId);
+    return c.json(result, 201);
+  })
   .openapi(getRoute, async (c) => {
     const { id } = c.req.valid("param");
     const ctx = buildTenantServiceContext(c);
     const result = await getConnection(ctx, id);
+    return c.json(result, 200);
+  })
+  .openapi(renameRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { name } = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await renameConnection(ctx, id, name);
     return c.json(result, 200);
   })
   .openapi(disconnectRoute, async (c) => {

@@ -216,6 +216,10 @@ export const whatsappConnection = pgTable(
     phoneNumberId: text("phone_number_id"),
     businessAccountId: text("business_account_id"),
     displayPhoneNumber: text("display_phone_number"),
+    // Nombre legible para identificar el número. Se autocompleta desde Kapso
+    // (verified_name) al conectar/importar; el usuario puede editarlo. Default
+    // tipo "WhatsApp #N" cuando Kapso no provee nombre (p. ej. vía webhook).
+    name: text("name"),
     // Tipo elegido en el embedded signup: coexistence | dedicated.
     connectionType: text("connection_type"),
     status: text("status").notNull().default("pending"),

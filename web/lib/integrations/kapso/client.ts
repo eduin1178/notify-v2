@@ -45,6 +45,26 @@ export type KapsoSetupLink = {
   expiresAt: string | null;
 };
 
+/** Número de WhatsApp tal como lo conoce Kapso (subset usado por Notify). */
+export type KapsoPhoneNumber = {
+  /** Meta phone number ID — el identificador rey. */
+  phoneNumberId: string;
+  businessAccountId: string | null;
+  displayPhoneNumber: string | null;
+  /** Nombre de negocio verificado por Meta (preferido para identificar). */
+  verifiedName: string | null;
+  /** Nombre visible al cliente (custom en Kapso). */
+  displayName: string | null;
+  /** Etiqueta interna del número en Kapso. */
+  name: string | null;
+  /** true = coexistence (WhatsApp Business App); false = dedicated. */
+  isCoexistence: boolean | null;
+  /** Estado de conexión de Meta (p. ej. "CONNECTED"). */
+  status: string | null;
+  /** Customer de Kapso dueño del número; null si no está asignado. */
+  customerId: string | null;
+};
+
 /** Error de transporte/HTTP de Kapso. El servicio decide cómo traducirlo a dominio. */
 export class KapsoApiError extends Error {
   readonly status: number;
@@ -72,6 +92,33 @@ type RawSetupLink = {
   url: string;
   expires_at?: string | null;
 };
+
+type RawPhoneNumber = {
+  id: string;
+  phone_number_id?: string | null;
+  business_account_id?: string | null;
+  display_phone_number?: string | null;
+  verified_name?: string | null;
+  display_name?: string | null;
+  name?: string | null;
+  is_coexistence?: boolean | null;
+  status?: string | null;
+  customer_id?: string | null;
+};
+
+function toPhoneNumber(raw: RawPhoneNumber): KapsoPhoneNumber {
+  return {
+    phoneNumberId: raw.phone_number_id ?? raw.id,
+    businessAccountId: raw.business_account_id ?? null,
+    displayPhoneNumber: raw.display_phone_number ?? null,
+    verifiedName: raw.verified_name ?? null,
+    displayName: raw.display_name ?? null,
+    name: raw.name ?? null,
+    isCoexistence: raw.is_coexistence ?? null,
+    status: raw.status ?? null,
+    customerId: raw.customer_id ?? null,
+  };
+}
 
 async function request<T>(
   path: string,
@@ -147,6 +194,28 @@ export async function createSetupLink(
     url: res.data.url,
     expiresAt: res.data.expires_at ?? null,
   };
+}
+
+/** GET /platform/v1/whatsapp/phone_numbers?customer_id=:id (lista por customer) */
+export async function listPhoneNumbers(
+  customerId: string,
+): Promise<KapsoPhoneNumber[]> {
+  const res = await request<DataEnvelope<RawPhoneNumber[]>>(
+    `/whatsapp/phone_numbers?customer_id=${encodeURIComponent(customerId)}&per_page=100`,
+    { method: "GET" },
+  );
+  return res.data.map(toPhoneNumber);
+}
+
+/** GET /platform/v1/whatsapp/phone_numbers/:phone_number_id */
+export async function getPhoneNumber(
+  phoneNumberId: string,
+): Promise<KapsoPhoneNumber> {
+  const res = await request<DataEnvelope<RawPhoneNumber>>(
+    `/whatsapp/phone_numbers/${encodeURIComponent(phoneNumberId)}`,
+    { method: "GET" },
+  );
+  return toPhoneNumber(res.data);
 }
 
 /** DELETE /platform/v1/whatsapp/phone_numbers/:phone_number_id (204) */
