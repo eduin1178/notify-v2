@@ -5,18 +5,23 @@ import type { HonoEnv } from "@/lib/api/context";
 import { requireSession } from "@/lib/api/middlewares/auth";
 import { requireOrgMembership } from "@/lib/api/middlewares/org";
 import {
+  AssignTagsInput,
   ContactDto,
   ContactIdParam,
   CreateContactInput,
   ListContactsQuery,
   PaginatedContactsResponse,
   UpdateContactInput,
+  WhatsappImportInput,
+  WhatsappImportReport,
 } from "@/lib/services/contacts/schemas";
 import {
   createContact,
   deleteContact,
   getContact,
+  importContactsFromWhatsApp,
   listContacts,
+  setContactTags,
   updateContact,
 } from "@/lib/services/contacts/service";
 import { OrgIdParam } from "@/lib/services/orgs/schemas";
@@ -117,6 +122,45 @@ const deleteRoute = createRoute({
   },
 });
 
+const setTagsRoute = createRoute({
+  method: "put",
+  path: "/orgs/{orgId}/contacts/{id}/tags",
+  tags: TAGS,
+  summary: "Reemplazar las etiquetas de un contacto",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: ContactItemParam,
+    body: { content: { "application/json": { schema: AssignTagsInput } } },
+  },
+  responses: {
+    200: {
+      description: "Contacto con sus etiquetas actualizadas.",
+      content: { "application/json": { schema: ContactDto } },
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
+const importWhatsappRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/contacts/import/whatsapp",
+  tags: TAGS,
+  summary: "Importar contactos desde WhatsApp (acotado al phone_number_id)",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: OrgIdParam,
+    body: { content: { "application/json": { schema: WhatsappImportInput } } },
+  },
+  responses: {
+    200: {
+      description: "Reporte de la importación desde WhatsApp.",
+      content: { "application/json": { schema: WhatsappImportReport } },
+    },
+    409: { description: "La conexión no está conectada o no tiene número." },
+    ...COMMON_ERRORS,
+  },
+});
+
 export const contactsRouter = new OpenAPIHono<HonoEnv>()
   .openapi(listRoute, async (c) => {
     const query = c.req.valid("query");
@@ -148,4 +192,17 @@ export const contactsRouter = new OpenAPIHono<HonoEnv>()
     const ctx = buildTenantServiceContext(c);
     await deleteContact(ctx, id);
     return c.body(null, 204);
+  })
+  .openapi(setTagsRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { tagIds } = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await setContactTags(ctx, id, tagIds);
+    return c.json(result, 200);
+  })
+  .openapi(importWhatsappRoute, async (c) => {
+    const { connectionId } = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await importContactsFromWhatsApp(ctx, connectionId);
+    return c.json(result, 200);
   });

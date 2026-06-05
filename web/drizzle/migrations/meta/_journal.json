@@ -43,6 +43,13 @@
       "when": 1780643660683,
       "tag": "0005_fixed_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780644247859,
+      "tag": "0006_low_cardiac",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,11 @@
 import { env } from "@/lib/env";
 
 const PLATFORM_BASE = `${env.KAPSO_API_BASE_URL}/platform/v1`;
+// Proxy de Meta (mensajería/contactos): base distinta de la Platform API e
+// incluye la versión de la Graph API. Doc Kapso: base
+// `https://api.kapso.ai/meta/whatsapp/v24.0`.
+const META_GRAPH_VERSION = "v24.0";
+const META_BASE = `${env.KAPSO_API_BASE_URL}/meta/whatsapp/${META_GRAPH_VERSION}`;
 
 export type KapsoConnectionType = "coexistence" | "dedicated";
 
@@ -120,11 +125,11 @@ function toPhoneNumber(raw: RawPhoneNumber): KapsoPhoneNumber {
   };
 }
 
-async function request<T>(
-  path: string,
+async function requestUrl<T>(
+  url: string,
   init: { method: string; body?: unknown },
 ): Promise<T> {
-  const res = await fetch(`${PLATFORM_BASE}${path}`, {
+  const res = await fetch(url, {
     method: init.method,
     headers: {
       "X-API-Key": env.KAPSO_API_KEY,
@@ -144,6 +149,14 @@ async function request<T>(
   if (res.status === 204) return undefined as T;
 
   return (await res.json()) as T;
+}
+
+/** Request contra la Platform API (`/platform/v1`). */
+async function request<T>(
+  path: string,
+  init: { method: string; body?: unknown },
+): Promise<T> {
+  return requestUrl<T>(`${PLATFORM_BASE}${path}`, init);
 }
 
 /** POST /platform/v1/customers */
@@ -224,4 +237,67 @@ export async function deletePhoneNumber(phoneNumberId: string): Promise<void> {
     `/whatsapp/phone_numbers/${encodeURIComponent(phoneNumberId)}`,
     { method: "DELETE" },
   );
+}
+
+/**
+ * Contacto de WhatsApp tal como lo expone Kapso (proxy de Meta). `waId` (E.164)
+ * puede ser null cuando Meta solo provee identidad por BSUID.
+ */
+export type KapsoContact = {
+  waId: string | null;
+  profileName: string | null;
+  displayName: string | null;
+  businessScopedUserId: string | null;
+};
+
+export type KapsoContactsPage = {
+  contacts: KapsoContact[];
+  /** Cursor de la página siguiente; null si no hay más resultados. */
+  nextCursor: string | null;
+};
+
+type RawContact = {
+  id: string;
+  wa_id?: string | null;
+  profile_name?: string | null;
+  display_name?: string | null;
+  business_scoped_user_id?: string | null;
+};
+
+type RawContactsPage = {
+  data: RawContact[];
+  paging?: {
+    cursors?: { after?: string | null; before?: string | null };
+    next?: string | null;
+  };
+};
+
+/**
+ * GET /meta/whatsapp/:phone_number_id/contacts — UNA página, scopeada al número.
+ * Paginación por cursor (`after`, `limit`≤100). Devuelve `nextCursor=null`
+ * cuando no hay más resultados.
+ */
+export async function listWhatsappContacts(
+  phoneNumberId: string,
+  options: { after?: string; limit?: number } = {},
+): Promise<KapsoContactsPage> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit ?? 100));
+  if (options.after) params.set("after", options.after);
+
+  const url = `${META_BASE}/${encodeURIComponent(phoneNumberId)}/contacts?${params.toString()}`;
+  const res = await requestUrl<RawContactsPage>(url, { method: "GET" });
+
+  const contacts = (res.data ?? []).map((c) => ({
+    waId: c.wa_id ?? null,
+    profileName: c.profile_name ?? null,
+    displayName: c.display_name ?? null,
+    businessScopedUserId: c.business_scoped_user_id ?? null,
+  }));
+
+  // Solo hay más páginas si esta trajo resultados y Kapso entregó cursor `after`.
+  const after = res.paging?.cursors?.after ?? null;
+  const nextCursor = contacts.length > 0 ? after : null;
+
+  return { contacts, nextCursor };
 }

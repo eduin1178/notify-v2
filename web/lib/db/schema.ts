@@ -5,6 +5,7 @@ import {
   boolean,
   integer,
   numeric,
+  primaryKey,
   unique,
 } from "drizzle-orm/pg-core";
 
@@ -280,6 +281,40 @@ export const contact = pgTable(
   }),
 );
 
+// Etiquetas de contacto, scoped por organización. Nombre único dentro de la org.
+export const tag = pgTable(
+  "tag",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    orgNameUnique: unique("tag_org_name_unique").on(t.organizationId, t.name),
+  }),
+);
+
+// Relación N:M entre contactos y etiquetas. PK compuesta evita duplicados; las
+// FKs cascade limpian asignaciones al borrar un contacto o una etiqueta.
+export const contactTag = pgTable(
+  "contact_tag",
+  {
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => contact.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tag.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.contactId, t.tagId] }),
+  }),
+);
+
 export const schema = {
   user,
   session,
@@ -296,4 +331,6 @@ export const schema = {
   whatsappConnection,
   whatsappWebhookEvent,
   contact,
+  tag,
+  contactTag,
 };

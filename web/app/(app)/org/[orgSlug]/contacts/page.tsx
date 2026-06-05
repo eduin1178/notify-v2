@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { buildServerTenantServiceContext } from "@/lib/api/server-ctx";
 import { loadOrgContext } from "@/lib/org/context";
 import { ListContactsQuery } from "@/lib/services/contacts/schemas";
-import { listContacts } from "@/lib/services/contacts/service";
+import { listContacts, listTags } from "@/lib/services/contacts/service";
 import { ContactsClient } from "@/components/app/contacts-client";
 
 export const metadata: Metadata = {
@@ -25,12 +25,16 @@ export default async function ContactsPage({
   const parsedQuery = ListContactsQuery.safeParse({
     page: sp.page,
     pageSize: sp.pageSize,
+    tagId: sp.tagId,
   });
   const query = parsedQuery.success
     ? parsedQuery.data
     : { page: 1, pageSize: 20 };
 
-  const result = await listContacts(svc, query);
+  const [result, availableTags] = await Promise.all([
+    listContacts(svc, query),
+    listTags(svc),
+  ]);
 
   return (
     <ContactsClient
@@ -39,6 +43,8 @@ export default async function ContactsPage({
       page={result.page}
       pageSize={result.pageSize}
       total={result.total}
+      availableTags={availableTags}
+      activeTagId={query.tagId ?? null}
     />
   );
 }
