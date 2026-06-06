@@ -1,3 +1,7 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 import {
   SidebarInset,
   SidebarProvider,
@@ -12,6 +16,11 @@ type Props = AppSidebarProps & {
 };
 
 export function AppShell({ children, ...sidebarProps }: Props) {
+  const pathname = usePathname();
+  // El inbox necesita ocupar todo el ancho/alto disponible (layout de 3 columnas
+  // con scroll propio). El resto de vistas usan el contenedor centrado.
+  const fullBleed = pathname?.endsWith("/inbox") ?? false;
+
   return (
     <TooltipProvider delayDuration={0}>
       <SidebarProvider>
@@ -21,9 +30,13 @@ export function AppShell({ children, ...sidebarProps }: Props) {
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 h-4" />
           </header>
-          <main className="flex-1 px-4 py-8">
-            <div className="mx-auto w-full max-w-5xl">{children}</div>
-          </main>
+          {fullBleed ? (
+            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+          ) : (
+            <main className="flex-1 px-4 py-8">
+              <div className="mx-auto w-full max-w-5xl">{children}</div>
+            </main>
+          )}
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

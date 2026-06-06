@@ -242,7 +242,7 @@ export function InboxClient({
   }
 
   return (
-    <div className="flex h-[calc(100svh-4rem)] overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* ── Columna izquierda: lista ─────────────────────────────────── */}
       <aside className="flex w-80 shrink-0 flex-col border-r">
         <div className="space-y-3 border-b p-3">

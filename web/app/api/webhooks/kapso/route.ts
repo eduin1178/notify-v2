@@ -24,6 +24,9 @@ export const runtime = "nodejs";
 
 const SIGNATURE_HEADER = "x-webhook-signature";
 const IDEMPOTENCY_HEADER = "x-idempotency-key";
+// Kapso entrega el nombre del evento en este header (no en el body para los
+// eventos de mensaje). Ver docs Kapso: X-Webhook-Event / X-Webhook-Signature.
+const EVENT_HEADER = "x-webhook-event";
 
 type KapsoWebhookData = {
   phone_number_id?: string;
@@ -99,7 +102,9 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const event = extractEvent(parsed);
+  // El nombre del evento llega en el header `X-Webhook-Event`; el body solo lo
+  // trae en el formato batch (`type`). Header primero, body como respaldo.
+  const event = request.headers.get(EVENT_HEADER) ?? extractEvent(parsed);
   const idempotencyKey = request.headers.get(IDEMPOTENCY_HEADER);
 
   // 3) Idempotencia DB-backed (cuando Kapso envía la cabecera).
