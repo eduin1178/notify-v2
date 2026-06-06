@@ -7,6 +7,7 @@ import {
   numeric,
   primaryKey,
   unique,
+  index,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -315,6 +316,112 @@ export const contactTag = pgTable(
   }),
 );
 
+// ── Inbox ─────────────────────────────────────────────────────────────────
+// Índice local de conversaciones (arquitectura híbrida): Notify es dueño del
+// ÍNDICE (estado de negocio, asignación, contacto, ventana 24h y preview
+// denormalizado); Kapso sigue siendo dueño del CONTENIDO (mensajes y media,
+// leídos por read-through). NO se guardan los mensajes aquí en este alcance.
+// Ver change add-inbox (design D1).
+//   notify_status:    abierta | pendiente | cerrada  (propio, indep. de Kapso)
+//   kapso_conversation_id: correlación con la conversación de Kapso. Nullable
+//     (una conversación proactiva puede existir antes de que Kapso le asigne id);
+//     único — los NULL no colisionan entre sí en Postgres.
+export const conversation = pgTable(
+  "conversation",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    // Número de la organización (req #6). 1 conexión → N conversaciones.
+    whatsappConnectionId: text("whatsapp_connection_id")
+      .notNull()
+      .references(() => whatsappConnection.id, { onDelete: "cascade" }),
+    // Contacto enlazado (CRM). Nullable: identidad BSUID-only sin teléfono.
+    contactId: text("contact_id").references(() => contact.id, {
+      onDelete: "set null",
+    }),
+    kapsoConversationId: text("kapso_conversation_id").unique(),
+    // Teléfono E.164 del cliente. Nullable para identidad solo BSUID.
+    phoneNumber: text("phone_number"),
+    // Estado de negocio propio de Notify (design D4).
+    notifyStatus: text("notify_status").notNull().default("abierta"),
+    // Agente asignado: usuario de Notify, no de Kapso (design D8).
+    assignedUserId: text("assigned_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    // Ventana de 24h: cierra en last_inbound_at + 24h (design D6).
+    lastInboundAt: timestamp("last_inbound_at"),
+    // Denormalizado para pintar la lista sin llamar a Kapso (design D1).
+    lastMessageAt: timestamp("last_message_at"),
+    lastMessageText: text("last_message_text"),
+    lastMessageType: text("last_message_type"),
+    unreadCount: integer("unread_count").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // Pinta y ordena la lista del número seleccionado.
+    orgConnLastMsgIdx: index("conversation_org_conn_last_msg_idx").on(
+      t.organizationId,
+      t.whatsappConnectionId,
+      t.lastMessageAt,
+    ),
+    // Filtros "Mis conversaciones / Otros".
+    orgAssigneeIdx: index("conversation_org_assignee_idx").on(
+      t.organizationId,
+      t.assignedUserId,
+    ),
+    // Filtro por estado (Abierta/Pendiente/Cerrada).
+    orgStatusIdx: index("conversation_org_status_idx").on(
+      t.organizationId,
+      t.notifyStatus,
+    ),
+  }),
+);
+
+// Configuración del inbox por número (design D13). Separada de
+// whatsapp_connection: responde "¿cómo se comporta el inbox de este número?".
+// La editan owner/admin; los member la leen. Nace mínima (dos campos).
+//   reopen_behavior: reopen_keep_agent | reopen_unassign | stay_closed
+export const inboxSettings = pgTable(
+  "inbox_settings",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    whatsappConnectionId: text("whatsapp_connection_id")
+      .notNull()
+      .references(() => whatsappConnection.id, { onDelete: "cascade" }),
+    reopenBehavior: text("reopen_behavior")
+      .notNull()
+      .default("reopen_keep_agent"),
+    sendReadReceipts: boolean("send_read_receipts").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    // Una sola configuración por número.
+    connectionUnique: unique("inbox_settings_connection_unique").on(
+      t.whatsappConnectionId,
+    ),
+  }),
+);
+
+// Ancla de deduplicación de uso por mensaje (design D7). Guarda SOLO el WAMID
+// (id de Meta) — NO el contenido del mensaje — para no contar dos veces el mismo
+// mensaje ante reentregas o lotes del webhook. La medición real va a usage_event;
+// esta tabla garantiza "una vez por WAMID" (la PK es el ancla idempotente).
+export const inboxMessageUsage = pgTable("inbox_message_usage", {
+  wamid: text("wamid").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(), // inbound | outbound
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+});
+
 export const schema = {
   user,
   session,
@@ -333,4 +440,7 @@ export const schema = {
   contact,
   tag,
   contactTag,
+  conversation,
+  inboxSettings,
+  inboxMessageUsage,
 };

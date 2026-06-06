@@ -23,7 +23,8 @@ export type Action =
   | "org.members.remove"
   | "org.leave"
   | "org.content.view"
-  | "org.whatsapp.connect";
+  | "org.whatsapp.connect"
+  | "org.inbox.configure";
 
 export function can(actor: Actor, action: Action, target: Target = { kind: "org" }): boolean {
   if (actor.isSuperAdmin && target.kind !== "member") return true;
@@ -47,6 +48,10 @@ export function can(actor: Actor, action: Action, target: Target = { kind: "org"
 
     case "org.whatsapp.connect":
       // Conectar/desconectar/reconectar cuentas de WhatsApp: solo owner/admin.
+      return role === "owner" || role === "admin";
+
+    case "org.inbox.configure":
+      // Configurar el inbox por número (reapertura, read receipts): owner/admin.
       return role === "owner" || role === "admin";
 
     case "org.members.view":

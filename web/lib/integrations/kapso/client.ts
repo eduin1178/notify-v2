@@ -301,3 +301,288 @@ export async function listWhatsappContacts(
 
   return { contacts, nextCursor };
 }
+
+// ── Inbox: conversaciones y mensajes (Platform API v1) ───────────────────────
+// El inbox usa la arquitectura híbrida (ver change add-inbox, design D1): el
+// ÍNDICE de conversaciones vive en Notify, pero el CONTENIDO (mensajes y media)
+// se lee de Kapso por read-through con estas funciones.
+
+/** Metadatos de conversación que Kapso adjunta bajo `kapso`. */
+type RawConversationKapso = {
+  contact_name?: string | null;
+  messages_count?: number | null;
+  last_message_id?: string | null;
+  last_message_type?: string | null;
+  last_message_timestamp?: string | null;
+  last_message_text?: string | null;
+  last_inbound_at?: string | null;
+  last_outbound_at?: string | null;
+};
+
+type RawConversation = {
+  id: string;
+  status?: string | null;
+  phone_number?: string | null;
+  phone_number_id?: string | null;
+  last_active_at?: string | null;
+  created_at?: string | null;
+  kapso?: RawConversationKapso | null;
+};
+
+/** Conversación de Kapso (subset usado por Notify para backfill/reconciliación). */
+export type KapsoConversation = {
+  id: string;
+  status: string | null;
+  phoneNumber: string | null;
+  phoneNumberId: string | null;
+  contactName: string | null;
+  lastMessageText: string | null;
+  lastMessageType: string | null;
+  lastMessageAt: string | null;
+  lastInboundAt: string | null;
+};
+
+export type KapsoConversationsPage = {
+  conversations: KapsoConversation[];
+  nextCursor: string | null;
+};
+
+type RawConversationsResponse = {
+  data: RawConversation[];
+  paging?: { cursors?: { after?: string | null; before?: string | null } };
+};
+
+function toConversation(raw: RawConversation): KapsoConversation {
+  const k = raw.kapso ?? {};
+  return {
+    id: raw.id,
+    status: raw.status ?? null,
+    phoneNumber: raw.phone_number ?? null,
+    phoneNumberId: raw.phone_number_id ?? null,
+    contactName: k.contact_name ?? null,
+    lastMessageText: k.last_message_text ?? null,
+    lastMessageType: k.last_message_type ?? null,
+    lastMessageAt: k.last_message_timestamp ?? raw.last_active_at ?? null,
+    lastInboundAt: k.last_inbound_at ?? null,
+  };
+}
+
+/**
+ * GET /platform/v1/whatsapp/conversations — UNA página, acotada al número.
+ * Ordena por actividad reciente; paginación por cursor (`after`, `limit`≤100).
+ */
+export async function listConversations(options: {
+  phoneNumberId: string;
+  status?: "active" | "ended";
+  phoneNumber?: string;
+  after?: string;
+  limit?: number;
+}): Promise<KapsoConversationsPage> {
+  const params = new URLSearchParams();
+  params.set("phone_number_id", options.phoneNumberId);
+  params.set("limit", String(options.limit ?? 50));
+  if (options.status) params.set("status", options.status);
+  if (options.phoneNumber) params.set("phone_number", options.phoneNumber);
+  if (options.after) params.set("after", options.after);
+
+  const res = await request<RawConversationsResponse>(
+    `/whatsapp/conversations?${params.toString()}`,
+    { method: "GET" },
+  );
+
+  const conversations = (res.data ?? []).map(toConversation);
+  const after = res.paging?.cursors?.after ?? null;
+  return {
+    conversations,
+    nextCursor: conversations.length > 0 ? after : null,
+  };
+}
+
+type RawMessage = {
+  id: string;
+  timestamp?: string | null;
+  type?: string | null;
+  kapso?: {
+    direction?: string | null;
+    status?: string | null;
+    whatsapp_conversation_id?: string | null;
+    content?: string | null;
+    has_media?: boolean | null;
+    media_url?: string | null;
+    media_data?: {
+      url?: string | null;
+      filename?: string | null;
+      content_type?: string | null;
+    } | null;
+    transcript?: { text?: string | null } | null;
+    contact_name?: string | null;
+  } | null;
+  text?: { body?: string | null } | null;
+  image?: { link?: string | null; caption?: string | null } | null;
+  video?: { link?: string | null; caption?: string | null } | null;
+  audio?: { link?: string | null } | null;
+  document?: {
+    link?: string | null;
+    filename?: string | null;
+    caption?: string | null;
+  } | null;
+  context?: { id?: string | null } | null;
+};
+
+/** Mensaje de WhatsApp (subset Meta + extensiones Kapso) usado por el hilo. */
+export type KapsoMessage = {
+  id: string;
+  type: string;
+  direction: "inbound" | "outbound";
+  status: string | null;
+  timestamp: string | null;
+  /** Texto o contenido legible del mensaje. */
+  text: string | null;
+  /** Pie de foto/caption para media. */
+  caption: string | null;
+  /** URL del media alojada por Kapso (read-through; no se duplica). */
+  mediaUrl: string | null;
+  mediaContentType: string | null;
+  filename: string | null;
+  transcript: string | null;
+  /** WAMID del mensaje citado, si aplica. */
+  replyToId: string | null;
+};
+
+export type KapsoMessagesPage = {
+  messages: KapsoMessage[];
+  /** Cursor de mensajes MÁS ANTIGUOS (la lista viene newest-first). */
+  nextCursor: string | null;
+};
+
+type RawMessagesResponse = {
+  data: RawMessage[];
+  paging?: { cursors?: { after?: string | null; before?: string | null } };
+};
+
+function toMessage(raw: RawMessage): KapsoMessage {
+  const k = raw.kapso ?? {};
+  const type = raw.type ?? "text";
+  const caption =
+    raw.image?.caption ?? raw.video?.caption ?? raw.document?.caption ?? null;
+  const text = raw.text?.body ?? k.content ?? null;
+  const mediaUrl =
+    k.media_url ??
+    k.media_data?.url ??
+    raw.image?.link ??
+    raw.video?.link ??
+    raw.audio?.link ??
+    raw.document?.link ??
+    null;
+  const ts = raw.timestamp
+    ? new Date(Number(raw.timestamp) * 1000).toISOString()
+    : null;
+  return {
+    id: raw.id,
+    type,
+    direction: k.direction === "outbound" ? "outbound" : "inbound",
+    status: k.status ?? null,
+    timestamp: ts,
+    text,
+    caption,
+    mediaUrl,
+    mediaContentType: k.media_data?.content_type ?? null,
+    filename: raw.document?.filename ?? k.media_data?.filename ?? null,
+    transcript: k.transcript?.text ?? null,
+    replyToId: raw.context?.id ?? null,
+  };
+}
+
+/**
+ * GET /platform/v1/whatsapp/messages — historial de UNA conversación
+ * (newest-first), paginación por cursor. `after` trae mensajes más antiguos.
+ */
+export async function listMessages(options: {
+  conversationId: string;
+  after?: string;
+  limit?: number;
+}): Promise<KapsoMessagesPage> {
+  const params = new URLSearchParams();
+  params.set("conversation_id", options.conversationId);
+  params.set("limit", String(options.limit ?? 50));
+  if (options.after) params.set("after", options.after);
+
+  const res = await request<RawMessagesResponse>(
+    `/whatsapp/messages?${params.toString()}`,
+    { method: "GET" },
+  );
+
+  const messages = (res.data ?? []).map(toMessage);
+  const after = res.paging?.cursors?.after ?? null;
+  return {
+    messages,
+    nextCursor: messages.length > 0 ? after : null,
+  };
+}
+
+/**
+ * Marca un mensaje entrante como leído (✓✓ azul) vía el proxy de Meta.
+ * POST /meta/whatsapp/:phone_number_id/messages { status: "read", message_id }.
+ */
+export async function markMessageRead(
+  phoneNumberId: string,
+  messageId: string,
+): Promise<void> {
+  const url = `${META_BASE}/${encodeURIComponent(phoneNumberId)}/messages`;
+  await requestUrl<unknown>(url, {
+    method: "POST",
+    body: {
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: messageId,
+    },
+  });
+}
+
+/** Eventos de mensaje/conversación que el inbox necesita recibir por webhook. */
+const INBOX_WEBHOOK_EVENTS = [
+  "whatsapp.message.received",
+  "whatsapp.message.sent",
+  "whatsapp.message.delivered",
+  "whatsapp.message.read",
+  "whatsapp.message.failed",
+  "whatsapp.conversation.created",
+  "whatsapp.conversation.ended",
+  "whatsapp.conversation.inactive",
+] as const;
+
+type RawWebhook = { id: string; url?: string | null; kind?: string | null };
+type RawWebhooksResponse = { data?: RawWebhook[] };
+
+/**
+ * Garantiza (idempotente) que el número tenga un webhook number-scoped `kapso`
+ * SIN buffering apuntando a `webhookUrl`, suscrito a los eventos del inbox.
+ * Si ya existe uno con la misma URL, no crea otro.
+ */
+export async function ensureMessageWebhook(
+  phoneNumberId: string,
+  webhookUrl: string,
+): Promise<void> {
+  const base = `/whatsapp/phone_numbers/${encodeURIComponent(phoneNumberId)}/webhooks`;
+
+  const existing = await request<RawWebhooksResponse>(base, {
+    method: "GET",
+  }).catch(() => ({ data: [] }) as RawWebhooksResponse);
+
+  if ((existing.data ?? []).some((w) => w.url === webhookUrl)) return;
+
+  await request<DataEnvelope<RawWebhook>>(base, {
+    method: "POST",
+    body: {
+      whatsapp_webhook: {
+        url: webhookUrl,
+        kind: "kapso",
+        secret_key: env.KAPSO_WEBHOOK_SECRET,
+        active: true,
+        buffer_enabled: false,
+        events: [...INBOX_WEBHOOK_EVENTS],
+        payload_version: "v2",
+      },
+    },
+  });
+}

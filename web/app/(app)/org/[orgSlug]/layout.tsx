@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import {
   AddressBookIcon,
+  ChatCircleTextIcon,
   UsersIcon,
   WhatsappLogoIcon,
 } from "@phosphor-icons/react/dist/ssr";
@@ -31,6 +32,11 @@ export default async function OrgLayout({
     .where(eq(schema.member.userId, ctx.session.user.id));
 
   const items = [
+    {
+      title: "Inbox",
+      url: `/org/${ctx.organization.slug}/inbox`,
+      icon: <ChatCircleTextIcon />,
+    },
     {
       title: "Miembros",
       url: `/org/${ctx.organization.slug}/members`,

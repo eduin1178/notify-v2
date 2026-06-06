@@ -1,16 +1,11 @@
-## **Gestión de contactos** 
+## **Inbox** 
 
-1. La aplicación debe tener la gestión de contactos, con atributos básicos como nombres, apellidos, teléfono, email, direccion, ciudad y empresa. Los únicos datos obligatorios son los nombres, apellidos y teléfono.
-2. La aplicación debe ser capaz de importar contactos desde la cuenta de whatsapp usando la api de Kapso/Meta.
-3. Se deben poder registrar, modificar y eliminar contactos manualmente mediante un formulario en la aplicación
-4. Se deben poder importar contactos mediante archivos csv
-5. Se deben poder exportar contactos en archivos csv
-7. Se deben poder asignar etiquetas a los contactos (una o varias etiquetas)
-8. Se deben poder filtrar los contactos por etiqueta.
-9. En el dashboard debe adicionarse una card que muestre la cantidad de contactos de la organización.
-10. El listado de contactos debe mostrarse en modo paginado, dado que la lista de contactos por organización puede llegar a ser bastante grande. 
-11. El paginador debe ser un componente reutilizable, pues en el futuro lo vamos a necesitar en otros modulos de la aplicación.
-12. El paginador debe tener los siguientes elementos:
-- Botón para ir a la primera página, a la página anterior, a la página siguiente y a la última página. En medio de los cuatro botones debe mostrar el número de la página actual. Estos botones van al lado izquierdo. 
-- En el extremo derecho debe aparecer un selector para que el usuario pueda elegir el número de registros por página. 
-- Los botones para avanzar y retroceder entre páginas deben habilitarse y deshabilitarse según corresponda
+La aplicación debe tener un inbox que permita a los usuarios de cada organización chatear con los clientes mediante los distintos números de whatsapp. Para ello se deben tener en cuenta las siguientes consideraciones
+
+1. Las conversaciones deben tener estados. Abierta, Cerrada, Pendiente
+2. Ventana de 24 horas. Se deben aplicar las reglas para cumplir con las políticas de Meta para la ventana de 24 horas en cuanto a los mensajes de servicio. Debe impedirse el envio de mensajes de servicio por fuera de la ventana de 24 horas.
+3. Mensajes de plantillas. Se debe poder seleccionar la planilla y llenar las variables para enviar mensajes de plantilla. Si la plantilla es de imagen, videos, documentos, se debe poder adjuntar el respectivo archivo antes de enviarlo.
+4. Asignación de agentes. La conversación debe poder asignarse a un agente (usuario) determinado. De tal forma que yo como usuario pueda filtrar para ver solo mis conversaciones (asignadas a mi), las no asignadas o las asignadas a otros usuarios.
+5. Desde la lista de contactos se debe poder inciar una conversación ya sea de plantilla o un mensaje de servicio.
+6. Selector de número. En la inbox se debe poder filtrar los mensajes por número de teléfono, de hecho debe ser el selctor principal. 
+7. Enviar texto, imagen, documentos, audios y vídeos.
