@@ -8,7 +8,7 @@ import { Dialog } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -126,17 +126,17 @@ function InviteForm({ orgSlug }: { orgSlug: string }) {
       <input type="hidden" name="orgSlug" value={orgSlug} />
       <h2 className="text-sm font-medium">Invitar nuevo miembro</h2>
       <div className="grid gap-3 sm:grid-cols-[1fr_140px_auto]">
-        <div className="space-y-1">
-          <Label htmlFor="email">Email</Label>
+        <Field>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input id="email" name="email" type="email" required placeholder="alguien@empresa.com" />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="role">Rol</Label>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="role">Rol</FieldLabel>
           <NativeSelect id="role" name="role" defaultValue="member">
             <option value="member">Miembro</option>
             <option value="admin">Administrador</option>
           </NativeSelect>
-        </div>
+        </Field>
         <div className="flex items-end">
           <InviteSubmit />
         </div>
@@ -381,8 +381,8 @@ function TransferOwnershipDialog({
 
           <form action={action} className="mt-4 space-y-4">
             <input type="hidden" name="orgSlug" value={orgSlug} />
-            <div className="space-y-1">
-              <Label htmlFor="memberId">Nuevo propietario</Label>
+            <Field>
+              <FieldLabel htmlFor="memberId">Nuevo propietario</FieldLabel>
               <NativeSelect id="memberId" name="memberId" required>
                 <option value="">Selecciona un miembro</option>
                 {eligibleMembers.map((m) => (
@@ -391,7 +391,7 @@ function TransferOwnershipDialog({
                   </option>
                 ))}
               </NativeSelect>
-            </div>
+            </Field>
             {state.error ? (
               <p role="alert" className="text-sm text-destructive">
                 {state.error}
@@ -450,12 +450,12 @@ function DeleteOrgDialog({ orgSlug }: { orgSlug: string }) {
 
           <form action={action} className="mt-4 space-y-4">
             <input type="hidden" name="orgSlug" value={orgSlug} />
-            <div className="space-y-1">
-              <Label htmlFor="confirm">
+            <Field>
+              <FieldLabel htmlFor="confirm">
                 Escribe <code className="font-mono">{orgSlug}</code> para confirmar
-              </Label>
+              </FieldLabel>
               <Input id="confirm" name="confirm" type="text" required autoComplete="off" />
-            </div>
+            </Field>
             {state.error ? (
               <p role="alert" className="text-sm text-destructive">
                 {state.error}

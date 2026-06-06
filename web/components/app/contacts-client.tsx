@@ -37,9 +37,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Field, FieldLabel, FieldError } from "@/components/ui/field";
 import { NativeSelect } from "@/components/ui/select";
 import { Pagination } from "@/components/ui/pagination";
 import type { ContactDtoT, TagDtoT } from "@/lib/services/contacts/schemas";
@@ -390,16 +400,16 @@ function ImportWhatsappDialog({
   }
 
   return (
-    <AlertDialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <AlertDialogContent className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Importar contactos desde WhatsApp</AlertDialogTitle>
-          <AlertDialogDescription>
+    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Importar contactos desde WhatsApp</DialogTitle>
+          <DialogDescription>
             Importa como contactos a las personas que han conversado con un
             número de WhatsApp conectado. Los contactos sin teléfono y los
             duplicados se omiten.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         {report ? (
           <div className="border border-border p-3 text-sm">
@@ -408,8 +418,8 @@ function ImportWhatsappDialog({
             duplicado: <strong>{report.skippedDuplicate}</strong>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="wa-connection">Número de WhatsApp</Label>
+          <Field>
+            <FieldLabel htmlFor="wa-connection">Número de WhatsApp</FieldLabel>
             {isLoading ? (
               <p className="text-sm text-muted-foreground">
                 Buscando números conectados…
@@ -432,15 +442,17 @@ function ImportWhatsappDialog({
                 de WhatsApp para poder importar.
               </p>
             )}
-          </div>
+          </Field>
         )}
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isImporting}>
-            {report ? "Cerrar" : "Cancelar"}
-          </AlertDialogCancel>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm" disabled={isImporting}>
+              {report ? "Cerrar" : "Cancelar"}
+            </Button>
+          </DialogClose>
           {!report ? (
             <Button
               size="sm"
@@ -450,9 +462,9 @@ function ImportWhatsappDialog({
               {isImporting ? "Importando…" : "Importar"}
             </Button>
           ) : null}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -500,17 +512,17 @@ function ImportCsvDialog({
   const report = state?.ok ? state.report : null;
 
   return (
-    <AlertDialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <AlertDialogContent className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Importar contactos desde CSV</AlertDialogTitle>
-          <AlertDialogDescription>
+    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Importar contactos desde CSV</DialogTitle>
+          <DialogDescription>
             El archivo debe incluir las columnas nombres y telefono (también
             apellidos, email, direccion, ciudad y empresa). Los teléfonos deben
             estar en formato internacional. Los duplicados por teléfono se
             omiten.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex flex-col gap-2">
           <input
@@ -547,10 +559,12 @@ function ImportCsvDialog({
           </div>
         ) : null}
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isPending}>
-            {report ? "Cerrar" : "Cancelar"}
-          </AlertDialogCancel>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm" disabled={isPending}>
+              {report ? "Cerrar" : "Cancelar"}
+            </Button>
+          </DialogClose>
           {!report ? (
             <Button
               size="sm"
@@ -560,9 +574,9 @@ function ImportCsvDialog({
               {isPending ? "Importando…" : "Importar"}
             </Button>
           ) : null}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -646,34 +660,33 @@ function ContactFormDialog({
   }
 
   return (
-    <AlertDialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <AlertDialogContent className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
             {isEdit ? "Editar contacto" : "Nuevo contacto"}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
-            Los campos nombres, apellidos y teléfono son obligatorios. El teléfono
-            debe estar en formato internacional, por ejemplo +573001234567.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogTitle>
+          <DialogDescription>
+            Registre los datos de contacto.
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field
+          <TextField
             id="firstName"
             label="Nombres"
             value={values.firstName}
             error={state.fieldErrors?.firstName}
             onChange={(v) => update("firstName", v)}
           />
-          <Field
+          <TextField
             id="lastName"
             label="Apellidos"
             value={values.lastName}
             error={state.fieldErrors?.lastName}
             onChange={(v) => update("lastName", v)}
           />
-          <Field
+          <TextField
             id="phone"
             label="Teléfono"
             value={values.phone}
@@ -681,34 +694,38 @@ function ContactFormDialog({
             error={state.fieldErrors?.phone}
             onChange={(v) => update("phone", v)}
           />
-          <Field
+          <TextField
             id="email"
-            label="Correo (opcional)"
+            label="Email"
             value={values.email}
             error={state.fieldErrors?.email}
             onChange={(v) => update("email", v)}
+            placeholder="email@dominio.com"
           />
-          <Field
+          <TextField
             id="company"
-            label="Empresa (opcional)"
+            label="Empresa"
             value={values.company}
             error={state.fieldErrors?.company}
             onChange={(v) => update("company", v)}
+            placeholder="Comercial Exito"
           />
-          <Field
+          <TextField
             id="city"
-            label="Ciudad (opcional)"
+            label="Ciudad y Departamento"
             value={values.city}
             error={state.fieldErrors?.city}
             onChange={(v) => update("city", v)}
+            placeholder="Medellín Antioquia"
           />
           <div className="sm:col-span-2">
-            <Field
+            <TextField
               id="address"
-              label="Dirección (opcional)"
+              label="Dirección completa"
               value={values.address}
               error={state.fieldErrors?.address}
               onChange={(v) => update("address", v)}
+              placeholder="Dirección"
             />
           </div>
         </div>
@@ -741,18 +758,22 @@ function ContactFormDialog({
           <p className="text-sm text-destructive">{state.error}</p>
         ) : null}
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isPending}>Cancelar</AlertDialogCancel>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm" disabled={isPending}>
+              Cancelar
+            </Button>
+          </DialogClose>
           <Button size="sm" onClick={submit} disabled={isPending}>
             {isPending ? "Guardando…" : "Guardar"}
           </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function Field({
+function TextField({
   id,
   label,
   value,
@@ -768,8 +789,8 @@ function Field({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <Label htmlFor={id}>{label}</Label>
+    <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input
         id={id}
         value={value}
@@ -777,8 +798,8 @@ function Field({
         aria-invalid={error ? true : undefined}
         onChange={(e) => onChange(e.target.value)}
       />
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-    </div>
+      <FieldError>{error}</FieldError>
+    </Field>
   );
 }
 
@@ -873,19 +894,19 @@ function ManageTagsDialog({
   }
 
   return (
-    <AlertDialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Gestionar etiquetas</AlertDialogTitle>
-          <AlertDialogDescription>
+    <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Gestionar etiquetas</DialogTitle>
+          <DialogDescription>
             Crea etiquetas para clasificar tus contactos. Al eliminar una
             etiqueta se quita de todos los contactos que la tengan.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex items-end gap-2">
-          <div className="flex flex-1 flex-col gap-1">
-            <Label htmlFor="new-tag">Nueva etiqueta</Label>
+          <Field className="flex-1">
+            <FieldLabel htmlFor="new-tag">Nueva etiqueta</FieldLabel>
             <Input
               id="new-tag"
               value={name}
@@ -893,7 +914,7 @@ function ManageTagsDialog({
               placeholder="Por ejemplo: Clientes"
               onChange={(e) => setName(e.target.value)}
             />
-          </div>
+          </Field>
           <Button size="sm" onClick={create} disabled={isPending}>
             Agregar
           </Button>
@@ -927,10 +948,14 @@ function ManageTagsDialog({
           )}
         </div>
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isPending}>Cerrar</AlertDialogCancel>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" size="sm" disabled={isPending}>
+              Cerrar
+            </Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
