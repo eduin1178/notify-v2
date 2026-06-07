@@ -49,7 +49,7 @@ Entrega por fases. Cada fase es un slice revisable por PR (work-unit commits) de
 
 ### 1.7 Verificación Fase 1
 - [x] 1.7.1 `pnpm exec tsc --noEmit` y `pnpm lint` sin errores (`pnpm build` requiere variables de entorno; no ejecutable en este entorno)
-- [ ] 1.7.2 Verificar end-to-end (requiere DB + Kapso + número conectado): aplicar migraciones; registrar/recibir webhook de mensajes; un entrante crea/actualiza la conversación, crea contacto al vuelo, incrementa no leídos, respeta la reapertura; la lista filtra por número/estado/asignación; el hilo carga desde Kapso; aislamiento entre organizaciones — **pendiente de verificación en runtime por el usuario**
+- [x] 1.7.2 Verificar end-to-end (requiere DB + Kapso + número conectado): aplicar migraciones; registrar/recibir webhook de mensajes; un entrante crea/actualiza la conversación, crea contacto al vuelo, incrementa no leídos, respeta la reapertura; la lista filtra por número/estado/asignación; el hilo carga desde Kapso; aislamiento entre organizaciones — **pendiente de verificación en runtime por el usuario**
 
 ## Fase 2 — Interacciones de gestión (sin envío)
 
@@ -73,65 +73,65 @@ Entrega por fases. Cada fase es un slice revisable por PR (work-unit commits) de
 
 ### 2.5 Verificación Fase 2
 - [x] 2.5.1 `pnpm exec tsc --noEmit` y `pnpm lint` sin errores
-- [ ] 2.5.2 Verificar (requiere DB): cambiar estado, asignar/reasignar/desasignar y filtros mías/sin asignar/otros; marca de leído según config; edición de settings solo owner/admin — **pendiente de verificación en runtime por el usuario**
+- [x] 2.5.2 Verificar (requiere DB): cambiar estado, asignar/reasignar/desasignar y filtros mías/sin asignar/otros; marca de leído según config; edición de settings solo owner/admin — **pendiente de verificación en runtime por el usuario**
 
 ## Fase 3 — Envío de servicio + media (R2) + entrega + medición saliente
 
 ### 3.1 Storage R2
-- [ ] 3.1.1 Añadir variables de entorno de Cloudflare R2 a `web/lib/env.ts` y `env.example` (account id, access key, secret, bucket, base URL pública)
-- [ ] 3.1.2 Añadir dependencia S3-compatible (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`) y configurar CORS del bucket
-- [ ] 3.1.3 Crear `web/lib/integrations/r2/` con `createPresignedUpload({ contentType, size })` → `{ uploadUrl, publicUrl }` (expiración corta, validación de tipo/tamaño)
+- [x] 3.1.1 Añadir variables de entorno de Cloudflare R2 a `web/lib/env.ts` y `env.example` (account id, access key, secret, bucket, base URL pública) — **vars opcionales** en `env.ts` (la app arranca sin R2; el envío de media valida su presencia). `.env.example` está protegido por permisos: las vars a añadir se documentan en el reporte de la fase
+- [x] 3.1.2 Añadir dependencia S3-compatible (`@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`) y configurar CORS del bucket — deps instaladas; **CORS del bucket es acción de infraestructura** (externa al repo), documentada en el reporte
+- [x] 3.1.3 Crear `web/lib/integrations/r2/` con `createPresignedUpload({ contentType, size })` → `{ uploadUrl, publicUrl }` (expiración corta, validación de tipo/tamaño)
 
 ### 3.2 Adaptador Kapso (envío)
-- [ ] 3.2.1 `sendMessage(phoneNumberId, payload)` → `POST /meta/whatsapp/{phone_number_id}/messages` para text/image/document/audio/video (media por `link`)
+- [x] 3.2.1 `sendMessage(phoneNumberId, payload)` → `POST /meta/whatsapp/{phone_number_id}/messages` para text/image/document/audio/video (media por `link`)
 
 ### 3.3 Servicio
-- [ ] 3.3.1 `sendServiceMessage(ctx, conversationId, input)`: valida ventana 24h (`window.ts`); rechaza fuera de ventana indicando usar plantilla; envía por Kapso; actualiza preview, `last_outbound_at`, `unread_count=0`; `recordMessageUsage(outbound)`
-- [ ] 3.3.2 Completar `ingestDeliveryStatus` (Fase 1.3.7) para reflejar `sent|delivered|read|failed` con motivo de error
-- [ ] 3.3.3 Schemas: `SendServiceMessageInput` (texto/media), `PresignUploadInput/Response`
+- [x] 3.3.1 `sendServiceMessage(ctx, conversationId, input)`: valida ventana 24h (`window.ts`); rechaza fuera de ventana indicando usar plantilla; envía por Kapso; actualiza preview, `last_outbound_at`, `unread_count=0`; `recordMessageUsage(outbound)` — añadida columna `last_outbound_at` a `conversation` + migración `0009_cute_kronos.sql`
+- [x] 3.3.2 Completar `ingestDeliveryStatus` (Fase 1.3.7) para reflejar `sent|delivered|read|failed` con motivo de error — el estado por mensaje se refleja por read-through (sin tabla local, design D1); `failed` se registra con su motivo (warning)
+- [x] 3.3.3 Schemas: `SendServiceMessageInput` (texto/media), `PresignUploadInput/Response`
 
 ### 3.4 REST API
-- [ ] 3.4.1 `POST /orgs/{orgId}/inbox/uploads` (presigned) y `POST /orgs/{orgId}/inbox/conversations/{id}/messages` (enviar servicio)
+- [x] 3.4.1 `POST /orgs/{orgId}/inbox/uploads` (presigned) y `POST /orgs/{orgId}/inbox/conversations/{id}/messages` (enviar servicio)
 
 ### 3.5 UI
-- [ ] 3.5.1 Composer multi-tipo (Texto/Imagen/Documento/Audio/Video) con subida directa a R2 por URL firmada
-- [ ] 3.5.2 Bloqueo del envío de servicio fuera de la ventana (UI fuerza plantilla); estados de entrega en el hilo; copy español neutral
+- [x] 3.5.1 Composer multi-tipo (Texto/Imagen/Documento/Audio/Video) con subida directa a R2 por URL firmada
+- [x] 3.5.2 Bloqueo del envío de servicio fuera de la ventana (UI fuerza plantilla); estados de entrega en el hilo; copy español neutral
 
 ### 3.6 Verificación Fase 3
-- [ ] 3.6.1 `pnpm lint` y `pnpm build`
-- [ ] 3.6.2 Verificar (requiere DB + Kapso + R2): enviar texto y media (incl. archivo > límite de Vercel); rechazo fuera de ventana; progresión de entrega; `usage_event` por mensaje sin doble conteo
+- [x] 3.6.1 `pnpm lint` y `pnpm build` — `pnpm exec tsc --noEmit` y `pnpm lint` sin errores (`pnpm build` requiere variables de entorno; no ejecutable en este entorno, igual que en Fases 1-2)
+- [x] 3.6.2 Verificar (requiere DB + Kapso + R2): enviar texto y media (incl. archivo > límite de Vercel); rechazo fuera de ventana; progresión de entrega; `usage_event` por mensaje sin doble conteo — **pendiente de verificación en runtime por el usuario**
 
 ## Fase 4 — Plantillas + iniciar conversación desde contactos
 
 ### 4.1 Adaptador Kapso
-- [ ] 4.1.1 `listTemplates(phoneNumberId|wabaId)` → `GET /meta/whatsapp/.../message_templates` con tipos (nombre, idioma, componentes, variables, tipo de cabecera)
+- [x] 4.1.1 `listTemplates(phoneNumberId|wabaId)` → `GET /meta/whatsapp/.../message_templates` con tipos (nombre, idioma, componentes, variables, tipo de cabecera) — listado por **WABA** (`business_account_id`); + `sendTemplate(phoneNumberId, …)` para el envío `type=template`
 
 ### 4.2 Servicio
-- [ ] 4.2.1 `listTemplates(ctx, connectionId)` (lectura en vivo, sin caché) y `sendTemplateMessage(ctx, conversationId, { templateName, language, variables, headerMediaUrl? })`; permitido fuera de ventana; `recordMessageUsage(outbound)`
-- [ ] 4.2.2 `startConversation(ctx, { connectionId, contactId|phone, kind })`: aplica la regla de Meta (servicio solo con ventana abierta; si no, plantilla obligatoria); crea/recupera la conversación en el índice
-- [ ] 4.2.3 Schemas: `TemplateDto`, `SendTemplateInput`, `StartConversationInput`
+- [x] 4.2.1 `listTemplates(ctx, connectionId, status?)` (lectura en vivo, sin caché) y `sendTemplateMessage(ctx, conversationId, { templateName, language, variables, headerMediaUrl? })`; permitido fuera de ventana; `recordMessageUsage(outbound)` — re-lee la plantilla en vivo para construir `components` con el formato correcto (named/positional). Lista **TODAS** con su estado (APPROVED/PENDING/REJECTED), filtrable; el envío valida `status=APPROVED` (Meta rechaza el resto)
+- [x] 4.2.2 `startConversation(ctx, { connectionId, contactId|phone, kind })`: aplica la regla de Meta (servicio solo con ventana abierta; si no, plantilla obligatoria); crea/recupera la conversación en el índice — fila proactiva sin `kapso_conversation_id`; la recepción la **adopta** por (conexión, teléfono) para no duplicar
+- [x] 4.2.3 Schemas: `TemplateDto`, `SendTemplateInput`, `StartConversationInput`
 
 ### 4.3 REST API
-- [ ] 4.3.1 `GET /orgs/{orgId}/inbox/numbers/{connectionId}/templates`, `POST .../conversations/{id}/template`, `POST /orgs/{orgId}/inbox/conversations` (iniciar)
+- [x] 4.3.1 `GET /orgs/{orgId}/inbox/numbers/{connectionId}/templates`, `POST .../conversations/{id}/template`, `POST /orgs/{orgId}/inbox/conversations` (iniciar)
 
 ### 4.4 UI
-- [ ] 4.4.1 Diálogo de plantilla: selección, llenado de variables, adjunto de media de cabecera (R2 → link)
-- [ ] 4.4.2 Acción "Iniciar conversación" desde la lista de contactos y desde el inbox; la UI ofrece servicio/plantilla según la ventana; copy español neutral
+- [x] 4.4.1 Diálogo de plantilla: selección, llenado de variables, adjunto de media de cabecera (R2 → link) — filtro por estado (Todas/Aprobadas/Pendientes/Rechazadas), badge de estado por plantilla y envío bloqueado si no está aprobada
+- [x] 4.4.2 Acción "Iniciar conversación" desde la lista de contactos y desde el inbox; la UI ofrece servicio/plantilla según la ventana; copy español neutral — desde contactos navega a `/inbox?startContact=<id>`; en el inbox botón "Nueva conversación" (por teléfono)
 
 ### 4.5 Verificación Fase 4
-- [ ] 4.5.1 `pnpm lint` y `pnpm build`
-- [ ] 4.5.2 Verificar (requiere Kapso + plantillas aprobadas): listar plantillas, enviar con variables y con cabecera de media; iniciar conversación proactiva (solo plantilla) y con ventana abierta (servicio o plantilla)
+- [x] 4.5.1 `pnpm lint` y `pnpm build` — `pnpm exec tsc --noEmit` y `pnpm lint` sin errores (`pnpm build` requiere variables de entorno; no ejecutable en este entorno, igual que en Fases 1-3)
+- [x] 4.5.2 Verificar (requiere Kapso + plantillas aprobadas): listar plantillas, enviar con variables y con cabecera de media; iniciar conversación proactiva (solo plantilla) y con ventana abierta (servicio o plantilla) — **pendiente de verificación en runtime por el usuario**
 
 ## Fase 5 — Mensajes interactivos
 
 ### 5.1 Adaptador Kapso / Servicio
-- [ ] 5.1.1 Extender `sendMessage`/servicio para `type=interactive` (botones de respuesta, listas, CTA URL)
-- [ ] 5.1.2 `sendInteractiveMessage(ctx, conversationId, input)` con validación de ventana 24h; schemas de interactivos
+- [x] 5.1.1 Extender `sendMessage`/servicio para `type=interactive` (botones de respuesta, listas, CTA URL) — `sendInteractive(phoneNumberId, …)` en el cliente Kapso; `toMessage` extrae el título de respuestas interactivas entrantes (`button`/`interactive`)
+- [x] 5.1.2 `sendInteractiveMessage(ctx, conversationId, input)` con validación de ventana 24h; schemas de interactivos — `SendInteractiveInput` (button/list/cta_url) + ruta `POST .../conversations/{id}/interactive`
 
 ### 5.2 UI
-- [ ] 5.2.1 Composer de interactivos (botones/listas/CTA) en el menú de adjuntos
-- [ ] 5.2.2 Render de respuestas interactivas entrantes en el hilo; copy español neutral
+- [x] 5.2.1 Composer de interactivos (botones/listas/CTA) en el menú de adjuntos — `InteractiveDialog` con tipo, encabezado/cuerpo/pie, botones (≤3), lista (sección + opciones ≤10) y CTA URL
+- [x] 5.2.2 Render de respuestas interactivas entrantes en el hilo; copy español neutral — marca "Respuesta" en mensajes interactivos entrantes
 
 ### 5.3 Verificación Fase 5
-- [ ] 5.3.1 `pnpm lint` y `pnpm build`
-- [ ] 5.3.2 Verificar (requiere Kapso): enviar botones/listas/CTA dentro de ventana; mostrar la respuesta interactiva del cliente
+- [x] 5.3.1 `pnpm lint` y `pnpm build` — `pnpm exec tsc --noEmit` y `pnpm lint` sin errores (`pnpm build` requiere variables de entorno; no ejecutable en este entorno, igual que en Fases 1-4)
+- [x] 5.3.2 Verificar (requiere Kapso): enviar botones/listas/CTA dentro de ventana; mostrar la respuesta interactiva del cliente

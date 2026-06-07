@@ -140,6 +140,217 @@ export const UpdateInboxSettingsInput = z.object({
   sendReadReceipts: z.boolean(),
 });
 
+// ── Envío de servicio + media (Fase 3) ───────────────────────────────────────
+
+/** Tipos de mensaje de servicio que el composer puede enviar. */
+export const ServiceMessageType = z.enum([
+  "text",
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
+
+/** Categoría de media admitida para subida directa a R2. */
+export const MediaCategory = z.enum(["image", "video", "audio", "document"]);
+
+/**
+ * Mensaje de servicio a enviar. `text` es el cuerpo (type=text) o el pie de
+ * foto/caption (media). `mediaUrl` es obligatorio para todo tipo no-texto y
+ * debe ser una URL pública (ya subida a R2).
+ */
+export const SendServiceMessageInput = z
+  .object({
+    type: ServiceMessageType,
+    text: z.string().trim().max(4096).optional(),
+    mediaUrl: z.string().url().optional(),
+    filename: z.string().trim().max(255).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.type === "text") {
+      if (!val.text || val.text.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["text"],
+          message: "El texto es obligatorio.",
+        });
+      }
+    } else if (!val.mediaUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mediaUrl"],
+        message: "El archivo es obligatorio para este tipo de mensaje.",
+      });
+    }
+  });
+
+/** Solicitud de URL firmada para subir un archivo directo a R2. */
+export const PresignUploadInput = z.object({
+  contentType: z.string().min(1).max(255),
+  size: z.number().int().positive(),
+  filename: z.string().max(255).optional(),
+});
+
+export const PresignUploadResponse = z.object({
+  uploadUrl: z.string().url(),
+  publicUrl: z.string().url(),
+  category: MediaCategory,
+});
+
+// ── Plantillas + iniciar conversación (Fase 4) ────────────────────────────────
+
+/** Formato de cabecera de la plantilla. */
+export const TemplateHeaderFormat = z.enum([
+  "TEXT",
+  "IMAGE",
+  "VIDEO",
+  "DOCUMENT",
+  "LOCATION",
+]);
+
+/**
+ * Plantilla aprobada lista para enviar. `bodyVariables`/`headerVariables` son
+ * las claves de variable (nombres si NAMED; índices "1","2"… si POSITIONAL).
+ */
+export const TemplateDto = z.object({
+  name: z.string(),
+  language: z.string(),
+  status: z.string().nullable(),
+  category: z.string().nullable(),
+  parameterFormat: z.enum(["named", "positional"]),
+  bodyText: z.string().nullable(),
+  headerFormat: TemplateHeaderFormat.nullable(),
+  headerText: z.string().nullable(),
+  bodyVariables: z.array(z.string()),
+  headerVariables: z.array(z.string()),
+});
+
+export const TemplatesResponse = z.object({
+  templates: z.array(TemplateDto),
+});
+
+/** Estado de aprobación de una plantilla en Meta. */
+export const TemplateStatus = z.enum(["APPROVED", "PENDING", "REJECTED"]);
+
+/** Filtro opcional por estado al listar plantillas. */
+export const TemplatesQuery = z.object({
+  status: TemplateStatus.optional(),
+});
+
+/** Envío de una plantilla con variables y, si aplica, media de cabecera. */
+export const SendTemplateInput = z.object({
+  templateName: z.string().min(1),
+  language: z.string().min(1),
+  bodyVariables: z.record(z.string(), z.string()).default({}),
+  headerVariables: z.record(z.string(), z.string()).default({}),
+  /** URL pública (R2) para cabeceras de imagen/video/documento. */
+  headerMediaUrl: z.string().url().optional(),
+});
+
+/** Inicio de conversación desde un contacto (proactivo o con ventana abierta). */
+export const StartConversationInput = z
+  .object({
+    connectionId: z.string().min(1),
+    contactId: z.string().min(1).optional(),
+    phone: z.string().min(1).optional(),
+    /** `service` exige ventana abierta; `template` siempre permitido. */
+    kind: z.enum(["service", "template"]).default("template"),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.contactId && !val.phone) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contactId"],
+        message: "Indica un contacto o un teléfono.",
+      });
+    }
+  });
+
+// ── Mensajes interactivos (Fase 5) ───────────────────────────────────────────
+
+/** Botón de respuesta (máx. 3 por mensaje). `title` ≤ 20 caracteres (Meta). */
+export const InteractiveButton = z.object({
+  id: z.string().trim().min(1).max(256),
+  title: z.string().trim().min(1).max(20),
+});
+
+/** Fila de una lista. `title` ≤ 24, `description` ≤ 72 (Meta). */
+export const InteractiveRow = z.object({
+  id: z.string().trim().min(1).max(200),
+  title: z.string().trim().min(1).max(24),
+  description: z.string().trim().max(72).optional(),
+});
+
+export const InteractiveSection = z.object({
+  title: z.string().trim().max(24).optional(),
+  rows: z.array(InteractiveRow).min(1).max(10),
+});
+
+/**
+ * Mensaje interactivo a enviar: botones de respuesta, lista o CTA URL. Sujeto a
+ * la ventana de 24h. Los campos requeridos dependen de `interactiveType`.
+ */
+export const SendInteractiveInput = z
+  .object({
+    interactiveType: z.enum(["button", "list", "cta_url"]),
+    bodyText: z.string().trim().min(1).max(1024),
+    headerText: z.string().trim().max(60).optional(),
+    footerText: z.string().trim().max(60).optional(),
+    // type=button
+    buttons: z.array(InteractiveButton).min(1).max(3).optional(),
+    // type=list
+    buttonLabel: z.string().trim().max(20).optional(),
+    sections: z.array(InteractiveSection).min(1).max(10).optional(),
+    // type=cta_url
+    ctaDisplayText: z.string().trim().min(1).max(20).optional(),
+    ctaUrl: z.string().url().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.interactiveType === "button") {
+      if (!val.buttons || val.buttons.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["buttons"],
+          message: "Agrega al menos un botón.",
+        });
+      }
+    } else if (val.interactiveType === "list") {
+      if (!val.buttonLabel) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["buttonLabel"],
+          message: "Indica el texto del botón de la lista.",
+        });
+      }
+      const totalRows = (val.sections ?? []).reduce(
+        (acc, s) => acc + s.rows.length,
+        0,
+      );
+      if (totalRows === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections"],
+          message: "Agrega al menos una opción a la lista.",
+        });
+      }
+      if (totalRows > 10) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sections"],
+          message: "La lista admite como máximo 10 opciones.",
+        });
+      }
+    } else if (val.interactiveType === "cta_url") {
+      if (!val.ctaDisplayText || !val.ctaUrl) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["ctaUrl"],
+          message: "Indica el texto y la URL del botón.",
+        });
+      }
+    }
+  });
+
 export type NotifyStatusT = z.infer<typeof NotifyStatus>;
 export type ReopenBehaviorT = z.infer<typeof ReopenBehavior>;
 export type InboxNumberDtoT = z.infer<typeof InboxNumberDto>;
@@ -156,3 +367,19 @@ export type UpdateStatusInputT = z.infer<typeof UpdateStatusInput>;
 export type AssignInputT = z.infer<typeof AssignInput>;
 export type InboxSettingsDtoT = z.infer<typeof InboxSettingsDto>;
 export type UpdateInboxSettingsInputT = z.infer<typeof UpdateInboxSettingsInput>;
+export type ServiceMessageTypeT = z.infer<typeof ServiceMessageType>;
+export type MediaCategoryT = z.infer<typeof MediaCategory>;
+export type SendServiceMessageInputT = z.infer<typeof SendServiceMessageInput>;
+export type PresignUploadInputT = z.infer<typeof PresignUploadInput>;
+export type PresignUploadResponseT = z.infer<typeof PresignUploadResponse>;
+export type TemplateHeaderFormatT = z.infer<typeof TemplateHeaderFormat>;
+export type TemplateDtoT = z.infer<typeof TemplateDto>;
+export type TemplatesResponseT = z.infer<typeof TemplatesResponse>;
+export type TemplateStatusT = z.infer<typeof TemplateStatus>;
+export type TemplatesQueryT = z.infer<typeof TemplatesQuery>;
+export type SendTemplateInputT = z.infer<typeof SendTemplateInput>;
+export type StartConversationInputT = z.infer<typeof StartConversationInput>;
+export type InteractiveButtonT = z.infer<typeof InteractiveButton>;
+export type InteractiveRowT = z.infer<typeof InteractiveRow>;
+export type InteractiveSectionT = z.infer<typeof InteractiveSection>;
+export type SendInteractiveInputT = z.infer<typeof SendInteractiveInput>;

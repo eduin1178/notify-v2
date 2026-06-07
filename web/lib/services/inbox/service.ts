@@ -16,7 +16,22 @@ import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-or
 import { can, type OrgRole } from "@/lib/auth/permissions";
 import type { db as DbClient } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
-import { listMessages, markMessageRead } from "@/lib/integrations/kapso/client";
+import {
+  listMessages,
+  listTemplates as kapsoListTemplates,
+  markMessageRead,
+  sendInteractive,
+  sendMessage,
+  sendTemplate,
+  type InteractivePayload,
+  type KapsoTemplate,
+  type OutboundMessage,
+  type TemplateSendComponent,
+} from "@/lib/integrations/kapso/client";
+import {
+  createPresignedUpload,
+  R2Error,
+} from "@/lib/integrations/r2/client";
 import type { TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import type { Logger } from "@/lib/services/logger";
@@ -39,7 +54,14 @@ import type {
   MessageThreadQueryT,
   MessageThreadResponseT,
   NotifyStatusT,
+  PresignUploadInputT,
+  PresignUploadResponseT,
   ReopenBehaviorT,
+  SendInteractiveInputT,
+  SendServiceMessageInputT,
+  SendTemplateInputT,
+  StartConversationInputT,
+  TemplateDtoT,
   UpdateInboxSettingsInputT,
 } from "@/lib/services/inbox/schemas";
 
@@ -422,6 +444,576 @@ export async function markRead(
   return loadConversationDto(ctx, id);
 }
 
+// ── Envío de servicio + media (Fase 3) ───────────────────────────────────────
+
+/** `phone_number_id` de Meta para una conexión de la org (o null si no aplica). */
+async function phoneNumberIdOf(
+  db: Db,
+  connectionId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ phoneNumberId: schema.whatsappConnection.phoneNumberId })
+    .from(schema.whatsappConnection)
+    .where(eq(schema.whatsappConnection.id, connectionId))
+    .limit(1);
+  return rows[0]?.phoneNumberId ?? null;
+}
+
+/** Construye el mensaje saliente de Kapso a partir del input del composer. */
+function toOutboundMessage(
+  to: string,
+  input: SendServiceMessageInputT,
+): OutboundMessage {
+  switch (input.type) {
+    case "text":
+      return { type: "text", to, text: input.text ?? "" };
+    case "image":
+      return { type: "image", to, link: input.mediaUrl!, caption: input.text ?? null };
+    case "video":
+      return { type: "video", to, link: input.mediaUrl!, caption: input.text ?? null };
+    case "audio":
+      return { type: "audio", to, link: input.mediaUrl! };
+    case "document":
+      return {
+        type: "document",
+        to,
+        link: input.mediaUrl!,
+        filename: input.filename ?? null,
+        caption: input.text ?? null,
+      };
+  }
+}
+
+/**
+ * Envía un mensaje de servicio (texto o media) dentro de la ventana de 24h.
+ * Rechaza fuera de ventana (debe usarse plantilla, design D6/D10), envía por
+ * Kapso, actualiza el preview/`last_outbound_at`, pone los no leídos en cero y
+ * mide el uso saliente (dedup por WAMID, design D7).
+ */
+export async function sendServiceMessage(
+  ctx: TenantServiceContext,
+  conversationId: string,
+  input: SendServiceMessageInputT,
+): Promise<ConversationDtoT> {
+  const conversation = await loadOwnedConversation(ctx, conversationId);
+
+  if (!isWindowOpen(conversation.lastInboundAt, new Date())) {
+    throw DomainErrors.conflict(
+      "La ventana de 24 horas está cerrada. Usa una plantilla para escribir.",
+    );
+  }
+
+  if (!conversation.phoneNumber) {
+    throw DomainErrors.validation(
+      "La conversación no tiene un teléfono de destino válido.",
+    );
+  }
+
+  const phoneNumberId = await phoneNumberIdOf(
+    ctx.db,
+    conversation.whatsappConnectionId,
+  );
+  if (!phoneNumberId) {
+    throw DomainErrors.conflict("El número de WhatsApp no está disponible.");
+  }
+
+  const outbound = toOutboundMessage(conversation.phoneNumber, input);
+
+  let result: { messageId: string | null };
+  try {
+    result = await sendMessage(phoneNumberId, outbound);
+  } catch (err) {
+    ctx.logger.error("[inbox] fallo enviando mensaje de servicio", {
+      conversationId,
+      type: input.type,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw DomainErrors.conflict(
+      "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+    );
+  }
+
+  const now = new Date();
+  const preview = previewOf(input.type, input.text ?? null);
+  await ctx.db
+    .update(schema.conversation)
+    .set({
+      lastMessageText: preview,
+      lastMessageType: input.type,
+      lastMessageAt: now,
+      lastOutboundAt: now,
+      unreadCount: 0,
+      updatedAt: now,
+    })
+    .where(eq(schema.conversation.id, conversation.id));
+
+  if (result.messageId) {
+    await recordMessageUsage(ctx.db, {
+      organizationId: ctx.currentOrg.id,
+      wamid: result.messageId,
+      direction: "outbound",
+    });
+  }
+
+  return loadConversationDto(ctx, conversation.id);
+}
+
+/**
+ * Genera una URL firmada para subir media directo del navegador a R2 (design
+ * D10). El miembro ya está autorizado por el middleware de la ruta. Traduce los
+ * errores de configuración/validación de R2 a errores de dominio.
+ */
+export async function createUpload(
+  _ctx: TenantServiceContext,
+  input: PresignUploadInputT,
+): Promise<PresignUploadResponseT> {
+  try {
+    return await createPresignedUpload({
+      contentType: input.contentType,
+      size: input.size,
+      filename: input.filename ?? null,
+    });
+  } catch (err) {
+    if (err instanceof R2Error) {
+      throw DomainErrors.validation(err.message);
+    }
+    throw err;
+  }
+}
+
+// ── Mensajes interactivos (Fase 5) ────────────────────────────────────────────
+
+/** Construye el objeto `interactive` de Meta a partir del input del composer. */
+function buildInteractive(input: SendInteractiveInputT): InteractivePayload {
+  const interactive: Record<string, unknown> = {
+    type: input.interactiveType,
+    body: { text: input.bodyText },
+  };
+  if (input.headerText) {
+    interactive.header = { type: "text", text: input.headerText };
+  }
+  if (input.footerText) {
+    interactive.footer = { text: input.footerText };
+  }
+
+  if (input.interactiveType === "button") {
+    interactive.action = {
+      buttons: (input.buttons ?? []).map((b) => ({
+        type: "reply",
+        reply: { id: b.id, title: b.title },
+      })),
+    };
+  } else if (input.interactiveType === "list") {
+    interactive.action = {
+      button: input.buttonLabel,
+      sections: (input.sections ?? []).map((s) => ({
+        ...(s.title ? { title: s.title } : {}),
+        rows: s.rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          ...(r.description ? { description: r.description } : {}),
+        })),
+      })),
+    };
+  } else {
+    interactive.action = {
+      name: "cta_url",
+      parameters: { display_text: input.ctaDisplayText, url: input.ctaUrl },
+    };
+  }
+
+  return interactive;
+}
+
+/**
+ * Envía un mensaje interactivo (botones / lista / CTA URL). Es un mensaje de
+ * servicio: sujeto a la ventana de 24h (fuera de ella, plantilla). Mide el uso
+ * saliente.
+ */
+export async function sendInteractiveMessage(
+  ctx: TenantServiceContext,
+  conversationId: string,
+  input: SendInteractiveInputT,
+): Promise<ConversationDtoT> {
+  const conversation = await loadOwnedConversation(ctx, conversationId);
+
+  if (!isWindowOpen(conversation.lastInboundAt, new Date())) {
+    throw DomainErrors.conflict(
+      "La ventana de 24 horas está cerrada. Usa una plantilla para escribir.",
+    );
+  }
+  if (!conversation.phoneNumber) {
+    throw DomainErrors.validation(
+      "La conversación no tiene un teléfono de destino válido.",
+    );
+  }
+
+  const phoneNumberId = await phoneNumberIdOf(
+    ctx.db,
+    conversation.whatsappConnectionId,
+  );
+  if (!phoneNumberId) {
+    throw DomainErrors.conflict("El número de WhatsApp no está disponible.");
+  }
+
+  let result: { messageId: string | null };
+  try {
+    result = await sendInteractive(phoneNumberId, {
+      to: conversation.phoneNumber,
+      interactive: buildInteractive(input),
+    });
+  } catch (err) {
+    ctx.logger.error("[inbox] fallo enviando mensaje interactivo", {
+      conversationId,
+      type: input.interactiveType,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw DomainErrors.conflict(
+      "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+    );
+  }
+
+  const now = new Date();
+  await ctx.db
+    .update(schema.conversation)
+    .set({
+      lastMessageText: previewOf("interactive", input.bodyText),
+      lastMessageType: "interactive",
+      lastMessageAt: now,
+      lastOutboundAt: now,
+      unreadCount: 0,
+      updatedAt: now,
+    })
+    .where(eq(schema.conversation.id, conversation.id));
+
+  if (result.messageId) {
+    await recordMessageUsage(ctx.db, {
+      organizationId: ctx.currentOrg.id,
+      wamid: result.messageId,
+      direction: "outbound",
+    });
+  }
+
+  return loadConversationDto(ctx, conversation.id);
+}
+
+// ── Plantillas + iniciar conversación (Fase 4) ────────────────────────────────
+
+/** `phone_number_id` y `business_account_id` (WABA) de una conexión. */
+async function connectionMeta(
+  db: Db,
+  connectionId: string,
+): Promise<{ phoneNumberId: string | null; businessAccountId: string | null }> {
+  const rows = await db
+    .select({
+      phoneNumberId: schema.whatsappConnection.phoneNumberId,
+      businessAccountId: schema.whatsappConnection.businessAccountId,
+    })
+    .from(schema.whatsappConnection)
+    .where(eq(schema.whatsappConnection.id, connectionId))
+    .limit(1);
+  return {
+    phoneNumberId: rows[0]?.phoneNumberId ?? null,
+    businessAccountId: rows[0]?.businessAccountId ?? null,
+  };
+}
+
+/** Extrae las claves de variable (`{{nombre}}` o `{{1}}`) en orden, sin repetir. */
+function parseVariables(text: string | null): string[] {
+  if (!text) return [];
+  const keys: string[] = [];
+  const re = /\{\{\s*([^}]+?)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const key = m[1].trim();
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/** Mapea una plantilla de Kapso al DTO del inbox (con variables y header). */
+function toTemplateDto(t: KapsoTemplate): TemplateDtoT {
+  const body = t.components.find((c) => c.type === "BODY") ?? null;
+  const header = t.components.find((c) => c.type === "HEADER") ?? null;
+  const headerFormat = (header?.format ?? null) as TemplateDtoT["headerFormat"];
+  const headerText = headerFormat === "TEXT" ? (header?.text ?? null) : null;
+  const bodyVariables = parseVariables(body?.text ?? null);
+  const headerVariables = parseVariables(headerText);
+
+  const declared = t.parameterFormat?.toUpperCase();
+  const allKeys = [...bodyVariables, ...headerVariables];
+  const inferredNamed = allKeys.some((k) => !/^\d+$/.test(k));
+  const parameterFormat: "named" | "positional" =
+    declared === "NAMED"
+      ? "named"
+      : declared === "POSITIONAL"
+        ? "positional"
+        : inferredNamed
+          ? "named"
+          : "positional";
+
+  return {
+    name: t.name,
+    language: t.language,
+    status: t.status,
+    category: t.category,
+    parameterFormat,
+    bodyText: body?.text ?? null,
+    headerFormat,
+    headerText,
+    bodyVariables,
+    headerVariables,
+  };
+}
+
+/**
+ * Lista las plantillas de un número (lectura en vivo, sin caché). Sin `status`
+ * devuelve TODAS con su estado (APPROVED/PENDING/REJECTED), para que el usuario
+ * vea si están aprobadas sin entrar a Meta. El envío solo admite APPROVED.
+ */
+export async function listTemplates(
+  ctx: TenantServiceContext,
+  connectionId: string,
+  status?: string,
+): Promise<TemplateDtoT[]> {
+  await assertConnectionOwned(ctx, connectionId);
+  const { businessAccountId } = await connectionMeta(ctx.db, connectionId);
+  if (!businessAccountId) {
+    throw DomainErrors.conflict(
+      "El número no tiene una cuenta de WhatsApp Business asociada.",
+    );
+  }
+  const templates = await kapsoListTemplates(
+    businessAccountId,
+    status ? { status } : {},
+  );
+  return templates.map(toTemplateDto);
+}
+
+const MEDIA_HEADER_FORMATS = new Set(["IMAGE", "VIDEO", "DOCUMENT"]);
+
+/** Construye los `components` del envío de plantilla a partir del DTO + input. */
+function buildTemplateComponents(
+  dto: TemplateDtoT,
+  input: SendTemplateInputT,
+): TemplateSendComponent[] {
+  const named = dto.parameterFormat === "named";
+  const components: TemplateSendComponent[] = [];
+
+  const mapParams = (keys: string[], values: Record<string, string>) =>
+    keys.map((key) =>
+      named
+        ? { type: "text", parameter_name: key, text: values[key] ?? "" }
+        : { type: "text", text: values[key] ?? "" },
+    );
+
+  // Cabecera: media (link de R2) o texto con variables.
+  if (dto.headerFormat && MEDIA_HEADER_FORMATS.has(dto.headerFormat)) {
+    if (!input.headerMediaUrl) {
+      throw DomainErrors.validation(
+        "La plantilla requiere un archivo de cabecera.",
+      );
+    }
+    const kind = dto.headerFormat.toLowerCase(); // image | video | document
+    components.push({
+      type: "header",
+      parameters: [{ type: kind, [kind]: { link: input.headerMediaUrl } }],
+    });
+  } else if (dto.headerVariables.length > 0) {
+    components.push({
+      type: "header",
+      parameters: mapParams(dto.headerVariables, input.headerVariables),
+    });
+  }
+
+  if (dto.bodyVariables.length > 0) {
+    components.push({
+      type: "body",
+      parameters: mapParams(dto.bodyVariables, input.bodyVariables),
+    });
+  }
+
+  return components;
+}
+
+/** Sustituye las variables en el cuerpo para el preview de la lista. */
+function renderBody(dto: TemplateDtoT, input: SendTemplateInputT): string {
+  if (!dto.bodyText) return "[Plantilla]";
+  return dto.bodyText.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_full, key: string) => {
+    return input.bodyVariables[key.trim()] ?? _full;
+  });
+}
+
+/**
+ * Envía una plantilla a la conversación. Permitido SIEMPRE (también fuera de la
+ * ventana de 24h). Re-lee la plantilla en vivo para construir los `components`
+ * con el formato de variables correcto (named/positional). Mide el uso saliente.
+ */
+export async function sendTemplateMessage(
+  ctx: TenantServiceContext,
+  conversationId: string,
+  input: SendTemplateInputT,
+): Promise<ConversationDtoT> {
+  const conversation = await loadOwnedConversation(ctx, conversationId);
+
+  if (!conversation.phoneNumber) {
+    throw DomainErrors.validation(
+      "La conversación no tiene un teléfono de destino válido.",
+    );
+  }
+
+  const { phoneNumberId, businessAccountId } = await connectionMeta(
+    ctx.db,
+    conversation.whatsappConnectionId,
+  );
+  if (!phoneNumberId || !businessAccountId) {
+    throw DomainErrors.conflict("El número de WhatsApp no está disponible.");
+  }
+
+  const candidates = await kapsoListTemplates(businessAccountId, {
+    name: input.templateName,
+  });
+  const match = candidates.find(
+    (t) => t.name === input.templateName && t.language === input.language,
+  );
+  if (!match) {
+    throw DomainErrors.notFound("Plantilla no encontrada.");
+  }
+  // Solo las aprobadas son enviables; Meta rechaza el resto.
+  if ((match.status ?? "").toUpperCase() !== "APPROVED") {
+    throw DomainErrors.conflict(
+      "La plantilla aún no está aprobada por WhatsApp y no se puede enviar.",
+    );
+  }
+  const dto = toTemplateDto(match);
+  const components = buildTemplateComponents(dto, input);
+
+  let result: { messageId: string | null };
+  try {
+    result = await sendTemplate(phoneNumberId, {
+      to: conversation.phoneNumber,
+      name: input.templateName,
+      language: input.language,
+      components,
+    });
+  } catch (err) {
+    ctx.logger.error("[inbox] fallo enviando plantilla", {
+      conversationId,
+      template: input.templateName,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw DomainErrors.conflict(
+      "No se pudo enviar la plantilla. Inténtalo de nuevo.",
+    );
+  }
+
+  const now = new Date();
+  await ctx.db
+    .update(schema.conversation)
+    .set({
+      lastMessageText: previewOf("template", renderBody(dto, input)),
+      lastMessageType: "template",
+      lastMessageAt: now,
+      lastOutboundAt: now,
+      unreadCount: 0,
+      updatedAt: now,
+    })
+    .where(eq(schema.conversation.id, conversation.id));
+
+  if (result.messageId) {
+    await recordMessageUsage(ctx.db, {
+      organizationId: ctx.currentOrg.id,
+      wamid: result.messageId,
+      direction: "outbound",
+    });
+  }
+
+  return loadConversationDto(ctx, conversation.id);
+}
+
+/**
+ * Inicia (o recupera) una conversación desde un contacto/teléfono. Crea la fila
+ * proactiva del índice (sin `kapso_conversation_id`) si no existe. Aplica la
+ * regla de Meta: `kind=service` exige ventana abierta; si no, hay que usar
+ * plantilla (la conversación proactiva nueva nunca tiene ventana abierta).
+ */
+export async function startConversation(
+  ctx: TenantServiceContext,
+  input: StartConversationInputT,
+): Promise<ConversationDtoT> {
+  await assertConnectionOwned(ctx, input.connectionId);
+
+  let contactId: string | null = null;
+  let phone: string | null = null;
+
+  if (input.contactId) {
+    const rows = await ctx.db
+      .select({ id: schema.contact.id, phone: schema.contact.phone })
+      .from(schema.contact)
+      .where(
+        and(
+          eq(schema.contact.id, input.contactId),
+          eq(schema.contact.organizationId, ctx.currentOrg.id),
+        ),
+      )
+      .limit(1);
+    if (!rows[0]) throw DomainErrors.notFound("Contacto no encontrado.");
+    contactId = rows[0].id;
+    phone = rows[0].phone;
+  } else if (input.phone) {
+    phone = normalizePhone(
+      input.phone.startsWith("+") ? input.phone : `+${input.phone}`,
+    );
+    if (!phone) throw DomainErrors.validation("Teléfono no válido.");
+    contactId = await resolveOrCreateContact(
+      ctx.db,
+      ctx.currentOrg.id,
+      phone,
+      null,
+    );
+  }
+
+  if (!phone) throw DomainErrors.validation("Indica un contacto o un teléfono.");
+
+  const existing = await ctx.db
+    .select()
+    .from(schema.conversation)
+    .where(
+      and(
+        eq(schema.conversation.organizationId, ctx.currentOrg.id),
+        eq(schema.conversation.whatsappConnectionId, input.connectionId),
+        eq(schema.conversation.phoneNumber, phone),
+      ),
+    )
+    .limit(1);
+
+  const lastInboundAt = existing[0]?.lastInboundAt ?? null;
+  if (input.kind === "service" && !isWindowOpen(lastInboundAt, new Date())) {
+    throw DomainErrors.conflict(
+      "La ventana de 24 horas está cerrada. Inicia con una plantilla.",
+    );
+  }
+
+  if (existing[0]) {
+    return loadConversationDto(ctx, existing[0].id);
+  }
+
+  const id = crypto.randomUUID();
+  await ctx.db.insert(schema.conversation).values({
+    id,
+    organizationId: ctx.currentOrg.id,
+    whatsappConnectionId: input.connectionId,
+    contactId,
+    kapsoConversationId: null,
+    phoneNumber: phone,
+    notifyStatus: "abierta",
+    assignedUserId: null,
+    unreadCount: 0,
+  });
+
+  return loadConversationDto(ctx, id);
+}
+
 // ── Configuración por número (inbox_settings) ────────────────────────────────
 
 /** Verifica owner/admin sobre la organización activa (config del inbox). */
@@ -717,7 +1309,30 @@ export async function ingestInboundMessage(
     .from(schema.conversation)
     .where(eq(schema.conversation.kapsoConversationId, kapsoConversationId))
     .limit(1);
-  const existing = existingRows[0];
+  let existing = existingRows[0];
+
+  // Adopción: si no hay fila por kapso_conversation_id pero existe una proactiva
+  // (creada por `startConversation`, sin id de Kapso) para el mismo número y
+  // teléfono, se reutiliza en vez de duplicar. Se enlaza con su id de Kapso.
+  if (!existing && phone) {
+    const normalized = normalizePhone(
+      phone.startsWith("+") ? phone : `+${phone}`,
+    );
+    if (normalized) {
+      const proactive = await deps.db
+        .select()
+        .from(schema.conversation)
+        .where(
+          and(
+            eq(schema.conversation.whatsappConnectionId, connection.id),
+            eq(schema.conversation.phoneNumber, normalized),
+            isNull(schema.conversation.kapsoConversationId),
+          ),
+        )
+        .limit(1);
+      existing = proactive[0];
+    }
+  }
 
   const newWindow = opensNewWindow(existing?.lastInboundAt ?? null, ts);
 
@@ -738,6 +1353,8 @@ export async function ingestInboundMessage(
     await deps.db
       .update(schema.conversation)
       .set({
+        // Adopta el id de Kapso si la fila era proactiva (sin él).
+        kapsoConversationId: existing.kapsoConversationId ?? kapsoConversationId,
         lastInboundAt: ts,
         lastMessageAt: ts,
         lastMessageText: preview,
@@ -780,23 +1397,66 @@ export async function ingestInboundMessage(
   }
 }
 
+/** Error de entrega tal como lo entrega Meta/Kapso (subset tolerante). */
+type DeliveryError = {
+  code?: number | string | null;
+  title?: string | null;
+  message?: string | null;
+  error_data?: { details?: string | null } | null;
+};
+
 /** Payload de `whatsapp.message.sent|delivered|read|failed`. */
 export type DeliveryStatusPayload = {
-  message?: { id?: string | null; kapso?: { status?: string | null } | null } | null;
+  message?: {
+    id?: string | null;
+    kapso?: {
+      status?: string | null;
+      conversation_id?: string | null;
+      whatsapp_conversation_id?: string | null;
+      errors?: DeliveryError[] | null;
+    } | null;
+    errors?: DeliveryError[] | null;
+  } | null;
+  status?: string | null;
+  errors?: DeliveryError[] | null;
   phone_number_id?: string | null;
 };
 
+/** Extrae un motivo de fallo legible del payload (o null si no hay). */
+function failureReasonOf(payload: DeliveryStatusPayload): string | null {
+  const errors =
+    payload.message?.errors ?? payload.message?.kapso?.errors ?? payload.errors;
+  const first = errors?.[0];
+  if (!first) return null;
+  const detail = first.error_data?.details ?? first.message ?? first.title ?? null;
+  const code = first.code != null ? `[${first.code}] ` : "";
+  return detail ? `${code}${detail}` : code || null;
+}
+
 /**
- * Estado de entrega de un saliente. En la Fase 1 el hilo refleja el estado por
- * read-through (Kapso ya lo expone en `message.kapso.status`), así que aquí solo
- * se registra para trazabilidad; la reflexión enriquecida llega en la Fase 3.
+ * Refleja el estado de entrega de un saliente (`sent|delivered|read|failed`).
+ *
+ * Arquitectura híbrida (design D1): NO hay tabla de mensajes local, así que el
+ * estado por mensaje se refleja por read-through (Kapso lo expone en
+ * `message.kapso.status`). Aquí registramos la transición para trazabilidad y,
+ * en `failed`, el motivo del error (requisito de "indicar fallos con su
+ * motivo"). El `failed` se registra como warning para visibilidad operativa.
  */
 export async function ingestDeliveryStatus(
   deps: InboxWebhookDeps,
   payload: DeliveryStatusPayload,
 ): Promise<void> {
-  deps.logger.info("[inbox-webhook] estado de entrega", {
-    wamid: payload.message?.id ?? null,
-    status: payload.message?.kapso?.status ?? null,
-  });
+  const wamid = payload.message?.id ?? null;
+  const status = payload.message?.kapso?.status ?? payload.status ?? null;
+
+  if (status === "failed") {
+    deps.logger.warn("[inbox-webhook] mensaje saliente fallido", {
+      wamid,
+      status,
+      reason: failureReasonOf(payload),
+    });
+    return;
+  }
+
+  deps.logger.info("[inbox-webhook] estado de entrega", { wamid, status });
 }

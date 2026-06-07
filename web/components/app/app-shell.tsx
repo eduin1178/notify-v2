@@ -31,7 +31,12 @@ export function AppShell({ children, ...sidebarProps }: Props) {
             <Separator orientation="vertical" className="mr-2 h-4" />
           </header>
           {fullBleed ? (
-            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+            // Altura DEFINIDA (viewport − header h-14) para que el `h-full` del
+            // inbox resuelva y el scroll viva en la lista y el hilo, no en la
+            // ventana. `min-h-svh` del wrapper no es altura definida.
+            <main className="h-[calc(100svh-3.5rem)] overflow-hidden">
+              {children}
+            </main>
           ) : (
             <main className="flex-1 px-4 py-8">
               <div className="mx-auto w-full max-w-5xl">{children}</div>

@@ -64,6 +64,13 @@
       "when": 1780729020202,
       "tag": "0008_lyrical_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780804448676,
+      "tag": "0009_cute_kronos",
+      "breakpoints": true
     }
   ]
 }

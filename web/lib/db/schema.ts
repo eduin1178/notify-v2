@@ -352,6 +352,8 @@ export const conversation = pgTable(
     }),
     // Ventana de 24h: cierra en last_inbound_at + 24h (design D6).
     lastInboundAt: timestamp("last_inbound_at"),
+    // Último saliente del agente (denormalizado; lo fija el envío, Fase 3).
+    lastOutboundAt: timestamp("last_outbound_at"),
     // Denormalizado para pintar la lista sin llamar a Kapso (design D1).
     lastMessageAt: timestamp("last_message_at"),
     lastMessageText: text("last_message_text"),

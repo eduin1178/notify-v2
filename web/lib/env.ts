@@ -26,6 +26,17 @@ const envSchema = z.object({
   KAPSO_API_BASE_URL: z.string().url().default("https://api.kapso.ai"),
   // Secreto para verificar la firma HMAC SHA256 de los webhooks de Kapso.
   KAPSO_WEBHOOK_SECRET: z.string().min(1),
+
+  // Cloudflare R2 (almacenamiento de media saliente, design D10). Opcionales:
+  // la app arranca sin ellas; el envío de media valida su presencia al usarse.
+  // El media saliente se sube directo del navegador a R2 por URL firmada y se
+  // envía a Kapso por `link` (sortea el límite de body de Vercel).
+  R2_ACCOUNT_ID: z.string().min(1).optional(),
+  R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+  R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  R2_BUCKET: z.string().min(1).optional(),
+  // URL pública base del bucket (dominio R2 o dominio propio) para el `link`.
+  R2_PUBLIC_BASE_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

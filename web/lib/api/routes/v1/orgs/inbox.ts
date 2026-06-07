@@ -15,17 +15,31 @@ import {
   ListConversationsQuery,
   MessageThreadQuery,
   MessageThreadResponse,
+  PresignUploadInput,
+  PresignUploadResponse,
+  SendInteractiveInput,
+  SendServiceMessageInput,
+  SendTemplateInput,
+  StartConversationInput,
+  TemplatesQuery,
+  TemplatesResponse,
   UpdateInboxSettingsInput,
   UpdateStatusInput,
 } from "@/lib/services/inbox/schemas";
 import {
   assignConversation,
+  createUpload,
   getInboxSettings,
   getMessages,
   listConversations,
   listNumbers,
+  listTemplates,
   markRead,
+  sendInteractiveMessage,
+  sendServiceMessage,
+  sendTemplateMessage,
   setConversationStatus,
+  startConversation,
   updateInboxSettings,
 } from "@/lib/services/inbox/service";
 import { OrgIdParam } from "@/lib/services/orgs/schemas";
@@ -84,6 +98,129 @@ const messagesRoute = createRoute({
       description: "Mensajes de la conversación (newest-first).",
       content: { "application/json": { schema: MessageThreadResponse } },
     },
+    ...COMMON_ERRORS,
+  },
+});
+
+const uploadRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/inbox/uploads",
+  tags: TAGS,
+  summary: "Crear una URL firmada para subir media directo a R2",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: OrgIdParam,
+    body: { content: { "application/json": { schema: PresignUploadInput } } },
+  },
+  responses: {
+    200: {
+      description: "URL firmada de subida y URL pública del archivo.",
+      content: { "application/json": { schema: PresignUploadResponse } },
+    },
+    422: { description: "Tipo o tamaño de archivo no válido." },
+    ...COMMON_ERRORS,
+  },
+});
+
+const sendMessageRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/inbox/conversations/{id}/messages",
+  tags: TAGS,
+  summary: "Enviar un mensaje de servicio (texto o media) dentro de la ventana",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: ConversationItemParam,
+    body: {
+      content: { "application/json": { schema: SendServiceMessageInput } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Conversación actualizada tras el envío.",
+      content: { "application/json": { schema: ConversationDto } },
+    },
+    409: { description: "Ventana de 24h cerrada (usar plantilla)." },
+    422: { description: "Mensaje inválido." },
+    ...COMMON_ERRORS,
+  },
+});
+
+const templatesRoute = createRoute({
+  method: "get",
+  path: "/orgs/{orgId}/inbox/numbers/{connectionId}/templates",
+  tags: TAGS,
+  summary: "Listar las plantillas de un número con su estado (lectura en vivo)",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: { params: NumberSettingsParam, query: TemplatesQuery },
+  responses: {
+    200: {
+      description: "Plantillas aprobadas del número.",
+      content: { "application/json": { schema: TemplatesResponse } },
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
+const sendTemplateRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/inbox/conversations/{id}/template",
+  tags: TAGS,
+  summary: "Enviar una plantilla (permitido fuera de la ventana de 24h)",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: ConversationItemParam,
+    body: { content: { "application/json": { schema: SendTemplateInput } } },
+  },
+  responses: {
+    200: {
+      description: "Conversación actualizada tras el envío.",
+      content: { "application/json": { schema: ConversationDto } },
+    },
+    422: { description: "Plantilla o variables inválidas." },
+    ...COMMON_ERRORS,
+  },
+});
+
+const sendInteractiveRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/inbox/conversations/{id}/interactive",
+  tags: TAGS,
+  summary: "Enviar un mensaje interactivo (botones/lista/CTA) dentro de la ventana",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: ConversationItemParam,
+    body: { content: { "application/json": { schema: SendInteractiveInput } } },
+  },
+  responses: {
+    200: {
+      description: "Conversación actualizada tras el envío.",
+      content: { "application/json": { schema: ConversationDto } },
+    },
+    409: { description: "Ventana de 24h cerrada (usar plantilla)." },
+    422: { description: "Mensaje interactivo inválido." },
+    ...COMMON_ERRORS,
+  },
+});
+
+const startConversationRoute = createRoute({
+  method: "post",
+  path: "/orgs/{orgId}/inbox/conversations",
+  tags: TAGS,
+  summary: "Iniciar (o recuperar) una conversación desde un contacto",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: {
+    params: OrgIdParam,
+    body: {
+      content: { "application/json": { schema: StartConversationInput } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Conversación creada o recuperada.",
+      content: { "application/json": { schema: ConversationDto } },
+    },
+    409: { description: "Ventana cerrada para servicio (usar plantilla)." },
+    422: { description: "Datos de inicio inválidos." },
     ...COMMON_ERRORS,
   },
 });
@@ -196,6 +333,46 @@ export const inboxRouter = new OpenAPIHono<HonoEnv>()
     const query = c.req.valid("query");
     const ctx = buildTenantServiceContext(c);
     const result = await getMessages(ctx, id, query);
+    return c.json(result, 200);
+  })
+  .openapi(uploadRoute, async (c) => {
+    const input = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await createUpload(ctx, input);
+    return c.json(result, 200);
+  })
+  .openapi(sendMessageRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await sendServiceMessage(ctx, id, input);
+    return c.json(result, 200);
+  })
+  .openapi(templatesRoute, async (c) => {
+    const { connectionId } = c.req.valid("param");
+    const { status } = c.req.valid("query");
+    const ctx = buildTenantServiceContext(c);
+    const templates = await listTemplates(ctx, connectionId, status);
+    return c.json({ templates }, 200);
+  })
+  .openapi(sendTemplateRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await sendTemplateMessage(ctx, id, input);
+    return c.json(result, 200);
+  })
+  .openapi(sendInteractiveRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await sendInteractiveMessage(ctx, id, input);
+    return c.json(result, 200);
+  })
+  .openapi(startConversationRoute, async (c) => {
+    const input = c.req.valid("json");
+    const ctx = buildTenantServiceContext(c);
+    const result = await startConversation(ctx, input);
     return c.json(result, 200);
   })
   .openapi(updateStatusRoute, async (c) => {

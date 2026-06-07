@@ -426,6 +426,13 @@ type RawMessage = {
     filename?: string | null;
     caption?: string | null;
   } | null;
+  // Respuesta del cliente a un mensaje interactivo entrante.
+  button?: { text?: string | null; payload?: string | null } | null;
+  interactive?: {
+    type?: string | null;
+    button_reply?: { id?: string | null; title?: string | null } | null;
+    list_reply?: { id?: string | null; title?: string | null } | null;
+  } | null;
   context?: { id?: string | null } | null;
 };
 
@@ -465,7 +472,13 @@ function toMessage(raw: RawMessage): KapsoMessage {
   const type = raw.type ?? "text";
   const caption =
     raw.image?.caption ?? raw.video?.caption ?? raw.document?.caption ?? null;
-  const text = raw.text?.body ?? k.content ?? null;
+  // Respuesta interactiva entrante: el título elegido por el cliente.
+  const interactiveReply =
+    raw.button?.text ??
+    raw.interactive?.button_reply?.title ??
+    raw.interactive?.list_reply?.title ??
+    null;
+  const text = raw.text?.body ?? interactiveReply ?? k.content ?? null;
   const mediaUrl =
     k.media_url ??
     k.media_data?.url ??
@@ -518,6 +531,214 @@ export async function listMessages(options: {
     messages,
     nextCursor: messages.length > 0 ? after : null,
   };
+}
+
+/**
+ * Mensaje saliente de servicio (texto o media por `link`). El media ya vive en
+ * una URL pública (R2, design D10); aquí solo se referencia por `link`.
+ */
+export type OutboundMessage =
+  | { type: "text"; to: string; text: string }
+  | { type: "image"; to: string; link: string; caption?: string | null }
+  | { type: "video"; to: string; link: string; caption?: string | null }
+  | { type: "audio"; to: string; link: string }
+  | {
+      type: "document";
+      to: string;
+      link: string;
+      filename?: string | null;
+      caption?: string | null;
+    };
+
+type RawSendResponse = { messages?: { id?: string | null }[] | null };
+
+/** Normaliza el destinatario al formato de Meta (dígitos, sin `+`). */
+function toRecipient(to: string): string {
+  return to.replace(/[^\d]/g, "");
+}
+
+function toMetaBody(msg: OutboundMessage): Record<string, unknown> {
+  const base = { messaging_product: "whatsapp", to: toRecipient(msg.to) };
+  switch (msg.type) {
+    case "text":
+      return { ...base, type: "text", text: { body: msg.text } };
+    case "image":
+      return {
+        ...base,
+        type: "image",
+        image: { link: msg.link, ...(msg.caption ? { caption: msg.caption } : {}) },
+      };
+    case "video":
+      return {
+        ...base,
+        type: "video",
+        video: { link: msg.link, ...(msg.caption ? { caption: msg.caption } : {}) },
+      };
+    case "audio":
+      return { ...base, type: "audio", audio: { link: msg.link } };
+    case "document":
+      return {
+        ...base,
+        type: "document",
+        document: {
+          link: msg.link,
+          ...(msg.filename ? { filename: msg.filename } : {}),
+          ...(msg.caption ? { caption: msg.caption } : {}),
+        },
+      };
+  }
+}
+
+/**
+ * Envía un mensaje de servicio vía el proxy de Meta de Kapso.
+ * POST /meta/whatsapp/:phone_number_id/messages. Devuelve el WAMID del mensaje
+ * creado (o null si Kapso no lo expone). La ventana de 24h la valida el dominio.
+ */
+export async function sendMessage(
+  phoneNumberId: string,
+  msg: OutboundMessage,
+): Promise<{ messageId: string | null }> {
+  const url = `${META_BASE}/${encodeURIComponent(phoneNumberId)}/messages`;
+  const res = await requestUrl<RawSendResponse>(url, {
+    method: "POST",
+    body: toMetaBody(msg),
+  });
+  return { messageId: res.messages?.[0]?.id ?? null };
+}
+
+// ── Plantillas (Meta proxy) ──────────────────────────────────────────────────
+// Las plantillas se listan por WABA (`business_account_id`) y se envían por
+// número (`phone_number_id`). Lectura en vivo (sin caché, design Fase 4).
+
+type RawTemplateComponent = {
+  type?: string | null;
+  format?: string | null;
+  text?: string | null;
+};
+
+type RawTemplate = {
+  id?: string | null;
+  name: string;
+  language: string;
+  status?: string | null;
+  category?: string | null;
+  parameter_format?: string | null;
+  components?: RawTemplateComponent[] | null;
+};
+
+type RawTemplatesResponse = { data?: RawTemplate[] | null };
+
+/** Componente de plantilla (subset usado para extraer variables y header). */
+export type KapsoTemplateComponent = {
+  /** HEADER | BODY | FOOTER | BUTTONS */
+  type: string;
+  /** Para HEADER: TEXT | IMAGE | VIDEO | DOCUMENT | LOCATION. */
+  format: string | null;
+  text: string | null;
+};
+
+/** Plantilla aprobada de WhatsApp (subset usado por el inbox). */
+export type KapsoTemplate = {
+  id: string | null;
+  name: string;
+  language: string;
+  status: string | null;
+  category: string | null;
+  /** NAMED | POSITIONAL (formato de variables). */
+  parameterFormat: string | null;
+  components: KapsoTemplateComponent[];
+};
+
+/**
+ * GET /meta/whatsapp/:business_account_id/message_templates — plantillas del
+ * WABA. Sin `status` devuelve TODAS (con su estado APPROVED/PENDING/REJECTED),
+ * para que el usuario vea el estado de sus plantillas. Solo las APPROVED son
+ * enviables (lo valida el dominio).
+ */
+export async function listTemplates(
+  businessAccountId: string,
+  options: { status?: string; name?: string; limit?: number } = {},
+): Promise<KapsoTemplate[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit ?? 100));
+  if (options.status) params.set("status", options.status);
+  if (options.name) params.set("name", options.name);
+
+  const url = `${META_BASE}/${encodeURIComponent(businessAccountId)}/message_templates?${params.toString()}`;
+  const res = await requestUrl<RawTemplatesResponse>(url, { method: "GET" });
+
+  return (res.data ?? []).map((t) => ({
+    id: t.id ?? null,
+    name: t.name,
+    language: t.language,
+    status: t.status ?? null,
+    category: t.category ?? null,
+    parameterFormat: t.parameter_format ?? null,
+    components: (t.components ?? []).map((c) => ({
+      type: (c.type ?? "").toUpperCase(),
+      format: c.format ? c.format.toUpperCase() : null,
+      text: c.text ?? null,
+    })),
+  }));
+}
+
+/** Componente del envío de plantilla (estructura Meta ya construida). */
+export type TemplateSendComponent = Record<string, unknown>;
+
+/**
+ * Envía una plantilla vía el proxy de Meta. Permitido fuera de la ventana de
+ * 24h (las plantillas no están sujetas a la ventana de servicio).
+ */
+export async function sendTemplate(
+  phoneNumberId: string,
+  payload: {
+    to: string;
+    name: string;
+    language: string;
+    components: TemplateSendComponent[];
+  },
+): Promise<{ messageId: string | null }> {
+  const url = `${META_BASE}/${encodeURIComponent(phoneNumberId)}/messages`;
+  const res = await requestUrl<RawSendResponse>(url, {
+    method: "POST",
+    body: {
+      messaging_product: "whatsapp",
+      to: toRecipient(payload.to),
+      type: "template",
+      template: {
+        name: payload.name,
+        language: { code: payload.language },
+        ...(payload.components.length > 0
+          ? { components: payload.components }
+          : {}),
+      },
+    },
+  });
+  return { messageId: res.messages?.[0]?.id ?? null };
+}
+
+/** Objeto `interactive` de Meta ya construido por el dominio. */
+export type InteractivePayload = Record<string, unknown>;
+
+/**
+ * Envía un mensaje interactivo (botones / lista / CTA URL) vía el proxy de Meta.
+ * Sujeto a la ventana de 24h (lo valida el dominio).
+ */
+export async function sendInteractive(
+  phoneNumberId: string,
+  payload: { to: string; interactive: InteractivePayload },
+): Promise<{ messageId: string | null }> {
+  const url = `${META_BASE}/${encodeURIComponent(phoneNumberId)}/messages`;
+  const res = await requestUrl<RawSendResponse>(url, {
+    method: "POST",
+    body: {
+      messaging_product: "whatsapp",
+      to: toRecipient(payload.to),
+      type: "interactive",
+      interactive: payload.interactive,
+    },
+  });
+  return { messageId: res.messages?.[0]?.id ?? null };
 }
 
 /**

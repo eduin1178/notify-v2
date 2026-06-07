@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   AddressBookIcon,
+  ChatCircleTextIcon,
   DownloadSimpleIcon,
   PencilSimpleIcon,
   TagIcon,
@@ -277,6 +278,18 @@ export function ContactsClient({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label={`Iniciar conversación con ${contact.firstName}`}
+                        onClick={() =>
+                          router.push(
+                            `/org/${orgSlug}/inbox?startContact=${contact.id}`,
+                          )
+                        }
+                      >
+                        <ChatCircleTextIcon />
+                      </Button>
                       <Button
                         variant="outline"
                         size="icon-sm"
