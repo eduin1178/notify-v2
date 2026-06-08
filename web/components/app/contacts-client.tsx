@@ -6,6 +6,7 @@ import {
   AddressBookIcon,
   ChatCircleTextIcon,
   DownloadSimpleIcon,
+  MagnifyingGlassIcon,
   PencilSimpleIcon,
   TagIcon,
   TrashIcon,
@@ -97,6 +98,7 @@ export function ContactsClient({
   total,
   availableTags,
   activeTagId,
+  activeSearch,
 }: {
   orgSlug: string;
   contacts: ContactDtoT[];
@@ -105,11 +107,13 @@ export function ContactsClient({
   total: number;
   availableTags: TagDtoT[];
   activeTagId: string | null;
+  activeSearch: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [isNavigating, startNavigation] = useTransition();
+  const [search, setSearch] = useState(activeSearch ?? "");
 
   const [target, setTarget] = useState<EditTarget | null>(null);
   const [deleting, setDeleting] = useState<ContactDtoT | null>(null);
@@ -139,7 +143,12 @@ export function ContactsClient({
     });
   }
 
-  function navigate(next: { page?: number; pageSize?: number; tagId?: string | null }) {
+  function navigate(next: {
+    page?: number;
+    pageSize?: number;
+    tagId?: string | null;
+    search?: string | null;
+  }) {
     const params = new URLSearchParams(searchParams.toString());
     if (next.pageSize != null) {
       params.set("pageSize", String(next.pageSize));
@@ -150,6 +159,11 @@ export function ContactsClient({
       else params.delete("tagId");
       params.set("page", "1");
     }
+    if (next.search !== undefined) {
+      if (next.search) params.set("search", next.search);
+      else params.delete("search");
+      params.set("page", "1");
+    }
     if (next.page != null) {
       params.set("page", String(next.page));
     }
@@ -157,6 +171,20 @@ export function ContactsClient({
       router.push(`${pathname}?${params.toString()}`);
     });
   }
+
+  // Búsqueda con debounce: el término viaja por la URL (?search=) y la página
+  // servidor lo resuelve. El efecto solo se dispara al cambiar `search`; compara
+  // contra el término activo (capturado por closure) para no navegar al montar
+  // ni cuando la URL ya refleja el valor.
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (trimmed === (activeSearch ?? "")) return;
+    const id = setTimeout(() => {
+      navigate({ search: trimmed || null });
+    }, 350);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   return (
     <section className="flex flex-col gap-6 p-4">
@@ -209,7 +237,17 @@ export function ContactsClient({
         <p className="text-sm text-destructive">{exportError}</p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
+          <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o teléfono"
+            aria-label="Buscar contactos"
+            className="h-8 pl-8"
+          />
+        </div>
         <Label htmlFor="tag-filter" className="text-sm text-muted-foreground">
           Filtrar por etiqueta
         </Label>
@@ -232,9 +270,11 @@ export function ContactsClient({
       {contacts.length === 0 ? (
         <div className="border border-border bg-card p-8 text-center text-card-foreground">
           <p className="text-sm text-muted-foreground">
-            {activeTagId
-              ? "No hay contactos con esta etiqueta."
-              : "Aún no hay contactos. Crea el primero con “Nuevo contacto”."}
+            {activeSearch
+              ? "No hay contactos que coincidan con la búsqueda."
+              : activeTagId
+                ? "No hay contactos con esta etiqueta."
+                : "Aún no hay contactos. Crea el primero con “Nuevo contacto”."}
           </p>
         </div>
       ) : (

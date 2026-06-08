@@ -467,6 +467,9 @@ type RawMessagesResponse = {
   paging?: { cursors?: { after?: string | null; before?: string | null } };
 };
 
+/** Tipos de mensaje cuyo contenido es un archivo (no texto). */
+const MEDIA_TYPES = new Set(["image", "video", "audio", "document", "sticker"]);
+
 function toMessage(raw: RawMessage): KapsoMessage {
   const k = raw.kapso ?? {};
   const type = raw.type ?? "text";
@@ -478,7 +481,15 @@ function toMessage(raw: RawMessage): KapsoMessage {
     raw.interactive?.button_reply?.title ??
     raw.interactive?.list_reply?.title ??
     null;
-  const text = raw.text?.body ?? interactiveReply ?? k.content ?? null;
+  // `k.content` es una descripción que Kapso autogenera para media
+  // (p. ej. "Audio attached (...) [Type: audio/webm] URL: ..."); NO es un
+  // caption real, por eso no se usa como texto en mensajes de media. El caption
+  // real, si lo hay, viaja en `caption`.
+  const text =
+    raw.text?.body ??
+    interactiveReply ??
+    (MEDIA_TYPES.has(type) ? null : k.content) ??
+    null;
   const mediaUrl =
     k.media_url ??
     k.media_data?.url ??

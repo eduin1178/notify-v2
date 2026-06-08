@@ -26,6 +26,7 @@ export default async function ContactsPage({
     page: sp.page,
     pageSize: sp.pageSize,
     tagId: sp.tagId,
+    search: sp.search,
   });
   const query = parsedQuery.success
     ? parsedQuery.data
@@ -45,6 +46,7 @@ export default async function ContactsPage({
       total={result.total}
       availableTags={availableTags}
       activeTagId={query.tagId ?? null}
+      activeSearch={query.search ?? null}
     />
   );
 }

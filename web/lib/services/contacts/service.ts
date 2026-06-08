@@ -9,7 +9,7 @@
  * No hay distinción de rol en este alcance — los contactos son datos operativos.
  */
 
-import { and, desc, eq, exists, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 
 import { schema } from "@/lib/db/schema";
 import { listWhatsappContacts } from "@/lib/integrations/kapso/client";
@@ -163,9 +163,22 @@ export async function listContacts(
   ctx: TenantServiceContext,
   query: ListContactsQueryT,
 ): Promise<PaginatedContactsResponseT> {
-  const { page, pageSize, tagId } = query;
+  const { page, pageSize, tagId, search } = query;
 
   const conditions = [eq(schema.contact.organizationId, ctx.currentOrg.id)];
+  if (search) {
+    // Coincidencia insensible a mayúsculas contra nombre, apellido y teléfono
+    // (E.164). El término se usa como subcadena; `or(...)` nunca es undefined
+    // porque siempre pasamos al menos un predicado.
+    const term = `%${search}%`;
+    conditions.push(
+      or(
+        ilike(schema.contact.firstName, term),
+        ilike(schema.contact.lastName, term),
+        ilike(schema.contact.phone, term),
+      )!,
+    );
+  }
   if (tagId) {
     // Solo contactos que tienen la etiqueta indicada. La etiqueta es org-scoped;
     // un tagId ajeno no produce coincidencias (sus asignaciones apuntan a otra org).

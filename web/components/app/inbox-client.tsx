@@ -9,12 +9,11 @@ import {
   ChecksIcon,
   ClockIcon,
   DownloadSimpleIcon,
-  FileTextIcon,
   GearSixIcon,
+  InfoIcon,
   ListBulletsIcon,
   MagnifyingGlassIcon,
   PaperclipIcon,
-  PaperPlaneTiltIcon,
   PlusIcon,
   TrashIcon,
   WarningCircleIcon,
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { NativeSelect } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,15 @@ import type {
   NotifyStatusT,
   TemplatesResponseT,
 } from "@/lib/services/inbox/schemas";
+
+import type { ContactDtoT } from "@/lib/services/contacts/schemas";
+
+import { Composer } from "./inbox/composer";
+import {
+  sendMessageRequest,
+  sendMessageRequestJson,
+} from "./inbox/send-helpers";
+import { useAttachmentDraft } from "./inbox/use-attachment-draft";
 
 type StatusFilter = "" | NotifyStatusT;
 type AssignmentFilter = "all" | "mine" | "unassigned" | "others";
@@ -146,6 +155,12 @@ export function InboxClient({
     null,
   );
   const [newConvOpen, setNewConvOpen] = useState(false);
+  // Panel de información: oculto por defecto, se conmuta desde la cabecera.
+  const [infoOpen, setInfoOpen] = useState(false);
+  // Borrador de adjunto del composer (compartido con el arrastrar y soltar).
+  const draft = useAttachmentDraft();
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
   const handledStartRef = useRef(false);
 
   const conversationsKey = useMemo(() => {
@@ -227,6 +242,7 @@ export function InboxClient({
 
   /** Lleva el foco a una conversación recién iniciada (resetea filtros). */
   function focusConversation(conv: ConversationDtoT) {
+    resetDraft();
     setConnectionId(conv.connectionId);
     setStatus("");
     setAssignment("all");
@@ -267,7 +283,47 @@ export function InboxClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, connectionId, orgId]);
 
+  /** Descarta el borrador de adjunto al cambiar de conversación o número. */
+  function resetDraft() {
+    draft.clear();
+    setDragging(false);
+    dragCounter.current = 0;
+  }
+
+  /** ¿El arrastre trae archivos y la ventana de 24h está abierta? */
+  function canDropFiles(e: React.DragEvent): boolean {
+    return (
+      !!selected?.windowOpen &&
+      Array.from(e.dataTransfer.types).includes("Files")
+    );
+  }
+
+  function onThreadDragEnter(e: React.DragEvent) {
+    if (!canDropFiles(e)) return;
+    e.preventDefault();
+    dragCounter.current += 1;
+    setDragging(true);
+  }
+
+  function onThreadDragOver(e: React.DragEvent) {
+    if (canDropFiles(e)) e.preventDefault();
+  }
+
+  function onThreadDragLeave() {
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setDragging(false);
+  }
+
+  function onThreadDrop(e: React.DragEvent) {
+    dragCounter.current = 0;
+    setDragging(false);
+    if (!selected?.windowOpen) return;
+    e.preventDefault();
+    if (e.dataTransfer.files.length > 0) draft.addFiles(e.dataTransfer.files);
+  }
+
   function selectConversation(conv: ConversationDtoT) {
+    if (conv.id !== selectedId) resetDraft();
     setSelectedId(conv.id);
     if (conv.unreadCount > 0) {
       apiSend(
@@ -321,6 +377,7 @@ export function InboxClient({
             <NativeSelect
               value={connectionId}
               onChange={(e) => {
+                resetDraft();
                 setConnectionId(e.target.value);
                 setSelectedId(null);
               }}
@@ -417,7 +474,7 @@ export function InboxClient({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <ScrollArea className="min-h-0 flex-1">
           {convLoading && conversations.length === 0 ? (
             <div className="space-y-2 p-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -471,11 +528,25 @@ export function InboxClient({
               })}
             </ul>
           )}
-        </div>
+        </ScrollArea>
       </aside>
 
       {/* ── Panel central: hilo ──────────────────────────────────────── */}
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section
+        className="relative flex min-w-0 flex-1 flex-col"
+        onDragEnter={onThreadDragEnter}
+        onDragOver={onThreadDragOver}
+        onDragLeave={onThreadDragLeave}
+        onDrop={onThreadDrop}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-primary bg-background/80">
+            <p className="flex items-center gap-2 text-sm font-medium text-primary">
+              <PaperclipIcon className="size-5" />
+              Suelta para adjuntar
+            </p>
+          </div>
+        )}
         {!selected ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
             <ChatCircleTextIcon className="size-10 text-muted-foreground" />
@@ -492,16 +563,31 @@ export function InboxClient({
                     {initials(displayName(selected))}
                   </AvatarFallback>
                 </Avatar>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
+                <button
+                  type="button"
+                  onClick={() => setInfoOpen((v) => !v)}
+                  className="min-w-0 text-left"
+                  aria-label="Ver datos del contacto"
+                >
+                  <p className="truncate text-sm font-medium hover:underline">
                     {displayName(selected)}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
                     {selected.phoneNumber ?? ""}
                   </p>
-                </div>
+                </button>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  variant={infoOpen ? "secondary" : "outline"}
+                  size="icon"
+                  onClick={() => setInfoOpen((v) => !v)}
+                  aria-label="Información de la conversación"
+                  aria-pressed={infoOpen}
+                >
+                  <InfoIcon />
+                </Button>
                 <NativeSelect
                   value={selected.assignedUser?.id ?? ""}
                   onChange={(e) => changeAssignment(e.target.value)}
@@ -545,7 +631,8 @@ export function InboxClient({
               )}
             </div>
 
-            <div className="flex-1 space-y-2 overflow-y-auto bg-muted/10 p-4">
+            <ScrollArea className="min-h-0 flex-1 bg-muted/10">
+              <div className="space-y-2 p-4">
               {msgLoading && messages.length === 0 ? (
                 <div className="space-y-2">
                   {Array.from({ length: 5 }).map((_, i) => (
@@ -559,11 +646,13 @@ export function InboxClient({
               ) : (
                 messages.map((m) => <MessageBubble key={m.id} message={m} />)
               )}
-            </div>
+              </div>
+            </ScrollArea>
 
             <Composer
               orgId={orgId}
               conversation={selected}
+              draft={draft}
               onSent={afterSend}
               onOpenTemplate={() =>
                 setTemplateTarget({
@@ -577,9 +666,11 @@ export function InboxClient({
         )}
       </section>
 
-      {/* ── Panel derecho: contexto ──────────────────────────────────── */}
-      {selected && (
-        <aside className="hidden w-72 shrink-0 flex-col gap-4 border-l p-4 lg:flex">
+      {/* ── Panel derecho: contexto (oculto por defecto) ─────────────── */}
+      {selected && infoOpen && (
+        <aside className="flex w-72 shrink-0 flex-col border-l">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex flex-col gap-4 p-4">
           <div>
             <h3 className="mb-2 text-sm font-medium">Datos del contacto</h3>
             <dl className="space-y-1 text-sm">
@@ -610,6 +701,8 @@ export function InboxClient({
               />
             </dl>
           </div>
+            </div>
+          </ScrollArea>
         </aside>
       )}
 
@@ -1058,21 +1151,44 @@ function StartConversationDialog({
   onOpenChange: (v: boolean) => void;
   onStarted: (conv: ConversationDtoT) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function start() {
-    const value = phone.trim();
-    if (!value || busy) return;
+  // Debounce del término de búsqueda de contactos.
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(query.trim()), 300);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  const { data: contactsData, isLoading } = useSWR<{ items: ContactDtoT[] }>(
+    open && debounced
+      ? `/api/v1/orgs/${orgId}/contacts?pageSize=8&search=${encodeURIComponent(debounced)}`
+      : null,
+    fetcher,
+  );
+  const contacts = contactsData?.items ?? [];
+
+  function reset() {
+    setQuery("");
+    setDebounced("");
+    setPhone("");
+    setError(null);
+  }
+
+  /** Crea/recupera la conversación por contacto o por teléfono manual. */
+  async function start(payload: { contactId: string } | { phone: string }) {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       const conv = (await sendMessageRequestJson(
         `/api/v1/orgs/${orgId}/inbox/conversations`,
-        { connectionId, phone: value, kind: "template" },
+        { connectionId, kind: "template", ...payload },
       )) as ConversationDtoT;
-      setPhone("");
+      reset();
       onOpenChange(false);
       onStarted(conv);
     } catch (e) {
@@ -1085,13 +1201,19 @@ function StartConversationDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) reset();
+        onOpenChange(v);
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Iniciar conversación</DialogTitle>
           <DialogDescription>
-            Escribe el número del cliente en formato internacional (E.164). Si no
-            tiene una ventana de 24 horas abierta, deberás enviar una plantilla.
+            Busca un contacto por nombre o teléfono. Si no tiene una ventana de
+            24 horas abierta, deberás enviar una plantilla.
           </DialogDescription>
         </DialogHeader>
 
@@ -1102,17 +1224,75 @@ function StartConversationDialog({
               {error}
             </p>
           )}
+
           <Field>
-            <FieldLabel>Teléfono</FieldLabel>
+            <FieldLabel>Buscar contacto</FieldLabel>
+            <div className="relative">
+              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                disabled={busy}
+                placeholder="Nombre o teléfono"
+                className="pl-8"
+                onChange={(e) => setQuery(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </Field>
+
+          {debounced && (
+            <div className="max-h-56 overflow-y-auto rounded-md border">
+              {isLoading ? (
+                <p className="p-3 text-center text-xs text-muted-foreground">
+                  Buscando…
+                </p>
+              ) : contacts.length === 0 ? (
+                <p className="p-3 text-center text-xs text-muted-foreground">
+                  No hay contactos que coincidan.
+                </p>
+              ) : (
+                <ul>
+                  {contacts.map((c) => {
+                    const name = `${c.firstName} ${c.lastName ?? ""}`.trim();
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => start({ contactId: c.id })}
+                          className="flex w-full items-center gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/50 disabled:opacity-60"
+                        >
+                          <Avatar className="size-8 shrink-0">
+                            <AvatarFallback>{initials(name)}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {name}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {c.phone}
+                            </p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <Field>
+            <FieldLabel>¿No está en tus contactos? Escribe el teléfono</FieldLabel>
             <Input
               value={phone}
               disabled={busy}
               placeholder="+521234567890"
               onChange={(e) => setPhone(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && phone.trim()) {
                   e.preventDefault();
-                  start();
+                  start({ phone: phone.trim() });
                 }
               }}
             />
@@ -1125,8 +1305,12 @@ function StartConversationDialog({
               Cancelar
             </Button>
           </DialogClose>
-          <Button type="button" onClick={start} disabled={busy || !phone.trim()}>
-            {busy ? "Iniciando…" : "Iniciar"}
+          <Button
+            type="button"
+            onClick={() => start({ phone: phone.trim() })}
+            disabled={busy || !phone.trim()}
+          >
+            {busy ? "Iniciando…" : "Iniciar por teléfono"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1473,210 +1657,6 @@ function InteractiveDialog({
   );
 }
 
-/** Lee el mensaje de error de la API (DomainError → JSON) o un texto genérico. */
-async function sendMessageRequest(
-  url: string,
-  body: unknown,
-): Promise<void> {
-  const res = await fetch(url, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (res.ok) return;
-  const data = await res.json().catch(() => null);
-  const message =
-    (data && (data.message || data.error)) ||
-    "No se pudo completar la operación.";
-  throw new Error(message);
-}
-
-/** Tipos de archivo aceptados por el composer, por categoría. */
-const ACCEPT_ALL = "image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx";
-
-function Composer({
-  orgId,
-  conversation,
-  onSent,
-  onOpenTemplate,
-  onOpenInteractive,
-}: {
-  orgId: string;
-  conversation: ConversationDtoT;
-  onSent: () => void;
-  onOpenTemplate: () => void;
-  onOpenInteractive: () => void;
-}) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const base = `/api/v1/orgs/${orgId}/inbox/conversations/${conversation.id}/messages`;
-
-  if (!conversation.windowOpen) {
-    return (
-      <footer className="space-y-2 border-t p-3">
-        <p className="rounded-md bg-muted px-3 py-2.5 text-center text-xs text-muted-foreground">
-          La ventana de 24 horas está cerrada. Solo puedes escribir mediante una
-          plantilla.
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={onOpenTemplate}
-        >
-          <FileTextIcon /> Enviar plantilla
-        </Button>
-      </footer>
-    );
-  }
-
-  async function sendText() {
-    const value = text.trim();
-    if (!value || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      await sendMessageRequest(base, { type: "text", text: value });
-      setText("");
-      onSent();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo enviar el mensaje.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function sendFile(file: File) {
-    setSending(true);
-    setError(null);
-    try {
-      const contentType = file.type || "application/octet-stream";
-      const presign = (await sendMessageRequestJson(
-        `/api/v1/orgs/${orgId}/inbox/uploads`,
-        { contentType, size: file.size, filename: file.name },
-      )) as { uploadUrl: string; publicUrl: string; category: string };
-
-      const put = await fetch(presign.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": contentType },
-        body: file,
-      });
-      if (!put.ok) throw new Error("No se pudo subir el archivo.");
-
-      await sendMessageRequest(base, {
-        type: presign.category,
-        mediaUrl: presign.publicUrl,
-        ...(text.trim() ? { text: text.trim() } : {}),
-        ...(presign.category === "document" ? { filename: file.name } : {}),
-      });
-      setText("");
-      onSent();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo enviar el archivo.");
-    } finally {
-      setSending(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  return (
-    <footer className="space-y-1.5 border-t p-3">
-      {error && (
-        <p className="flex items-center gap-1.5 text-xs text-destructive">
-          <WarningCircleIcon className="size-3.5" />
-          {error}
-        </p>
-      )}
-      <div className="flex items-end gap-2">
-        <input
-          ref={fileRef}
-          type="file"
-          accept={ACCEPT_ALL}
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) sendFile(file);
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          disabled={sending}
-          onClick={() => fileRef.current?.click()}
-          aria-label="Adjuntar archivo"
-        >
-          <PaperclipIcon />
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          disabled={sending}
-          onClick={onOpenTemplate}
-          aria-label="Enviar plantilla"
-        >
-          <FileTextIcon />
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          disabled={sending}
-          onClick={onOpenInteractive}
-          aria-label="Enviar mensaje interactivo"
-        >
-          <ListBulletsIcon />
-        </Button>
-        <Input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              sendText();
-            }
-          }}
-          disabled={sending}
-          placeholder="Escribe un mensaje"
-        />
-        <Button
-          type="button"
-          size="icon"
-          disabled={sending || !text.trim()}
-          onClick={sendText}
-          aria-label="Enviar mensaje"
-        >
-          <PaperPlaneTiltIcon />
-        </Button>
-      </div>
-    </footer>
-  );
-}
-
-/** Igual que `sendMessageRequest` pero devuelve el JSON de respuesta. */
-async function sendMessageRequestJson(
-  url: string,
-  body: unknown,
-): Promise<unknown> {
-  const res = await fetch(url, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => null);
-  if (res.ok) return data;
-  const message =
-    (data && (data.message || data.error)) ||
-    "No se pudo completar la operación.";
-  throw new Error(message);
-}
-
 const DELIVERY_LABEL: Record<string, string> = {
   pending: "Pendiente",
   sent: "Enviado",
@@ -1716,10 +1696,6 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
   audio: "Audio",
   document: "Documento",
 };
-
-function isHttpUrl(s: string): boolean {
-  return /^https?:\/\/\S+$/i.test(s.trim());
-}
 
 /** Enlace de descarga con ícono (no muestra la URL cruda). */
 function DownloadLink({
@@ -1816,9 +1792,9 @@ function isInteractive(message: MessageDtoT): boolean {
 
 function MessageBubble({ message }: { message: MessageDtoT }) {
   const outbound = message.direction === "outbound";
-  // El `text` de un media suele venir con la URL; no se muestra como texto.
-  const showText =
-    message.text && !(message.mediaUrl && isHttpUrl(message.text));
+  // En mensajes con media nunca se pinta `text` (el caption real va en
+  // `caption`); evita que descripciones autogeneradas o URLs rompan la burbuja.
+  const showText = message.text && !message.mediaUrl;
   const interactiveReply = !outbound && isInteractive(message);
   return (
     <div className={cn("flex", outbound ? "justify-end" : "justify-start")}>

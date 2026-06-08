@@ -1,9 +1,7 @@
 ## Purpose
 
 Define la gestión de contactos por organización en Notify (multi-tenant): el registro de destinatarios sobre el que se apoyan los envíos y la segmentación. Cubre el CRUD manual, el teléfono como identidad única por organización (E.164), el listado paginado por offset con un paginador reutilizable, el etiquetado N:M y el filtro por etiqueta, la importación y exportación CSV, la importación desde WhatsApp (Kapso) acotada al `phone_number_id` de una conexión, el conteo en el dashboard y la autorización por membresía. Los contactos NO son un entitlement facturado en este alcance.
-
 ## Requirements
-
 ### Requirement: Modelo de contacto y atributos
 
 El sistema SHALL gestionar contactos asociados a una organización con los atributos: `nombres`, `apellidos`, `teléfono`, `email`, `dirección`, `ciudad` y `empresa`. Únicamente `nombres` y `teléfono` SHALL ser obligatorios en el alta manual; en el alta manual el `apellido` también SHALL ser obligatorio. El resto de atributos SHALL ser opcionales. Cada contacto SHALL pertenecer a exactamente una organización y el acceso SHALL estar aislado por organización.
@@ -167,3 +165,28 @@ El sistema SHALL permitir todas las operaciones sobre contactos y etiquetas (lis
 #### Scenario: Usuario no miembro
 - **WHEN** un usuario que no es miembro de la organización del path intenta cualquier operación sobre contactos
 - **THEN** el sistema rechaza la operación con un error de tipo `forbidden`
+
+### Requirement: Búsqueda de contactos por nombre y teléfono
+
+El sistema SHALL permitir buscar contactos del listado de una organización por un término que SHALL coincidir, de forma insensible a mayúsculas, contra el **nombre** (nombre y apellido) y contra el **número de teléfono** en formato E.164. La búsqueda SHALL combinarse con la paginación por offset existente, devolviendo `page`, `pageSize`, `total` y `totalPages` calculados sobre el conjunto de coincidencias, y SHALL poder combinarse con el filtrado por etiqueta. La búsqueda SHALL estar acotada a la organización del contexto.
+
+#### Scenario: Coincidencia por nombre
+- **WHEN** un miembro busca un término que coincide con el nombre o apellido de uno o más contactos
+- **THEN** el sistema devuelve solo los contactos coincidentes, paginados, con `total` y `totalPages` calculados sobre las coincidencias
+
+#### Scenario: Coincidencia por teléfono
+- **WHEN** un miembro busca un término que coincide con el teléfono E.164 de un contacto
+- **THEN** el sistema devuelve ese contacto entre las coincidencias
+
+#### Scenario: Sin coincidencias
+- **WHEN** un miembro busca un término que no coincide con ningún contacto de la organización
+- **THEN** el sistema devuelve una lista vacía con los metadatos de paginación correctos
+
+#### Scenario: Búsqueda combinada con etiqueta
+- **WHEN** un miembro aplica a la vez un filtro de etiqueta y un término de búsqueda
+- **THEN** el sistema devuelve solo los contactos que cumplen ambos criterios
+
+#### Scenario: Aislamiento por organización
+- **WHEN** un miembro busca contactos
+- **THEN** el sistema nunca devuelve contactos de otra organización, aunque coincidan con el término
+

@@ -86,6 +86,8 @@ export const ListContactsQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   tagId: z.string().min(1).optional(),
+  // Búsqueda por nombre/apellido/teléfono (insensible a mayúsculas).
+  search: z.string().trim().min(1).optional(),
 });
 
 export const PaginatedContactsResponse = z.object({
