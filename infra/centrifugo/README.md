@@ -50,6 +50,28 @@ un *subscription token* que la API de la app emite solo tras verificar la membre
 de la organización. No usar `#` en los nombres de canal (en Centrífugo delimita
 canales por user-id).
 
+### History + recovery (OBLIGATORIO para no perder mensajes)
+
+El namespace activa `history_size`, `history_ttl` y `force_recovery`. Sin esto,
+cualquier microcorte del WebSocket (típico en pestañas en segundo plano, que el
+navegador throttlea) hace que el cliente **pierda** las publicaciones ocurridas
+durante la desconexión: al reconectar no hay nada que recuperar y el inbox solo se
+actualiza cuando SWR revalida (al recuperar foco o en el poll de respaldo) → el
+mensaje "no llega hasta que activas la ventana".
+
+Con `force_recovery: true` (+ history) Centrífugo **reenvía las publicaciones
+perdidas al reconectar**, de forma automática en `centrifuge-js` (sin cambios en el
+frontend). Mantén estos valores alineados con `without_namespace`:
+
+```json
+{
+  "name": "notify_inbox",
+  "history_size": 100,
+  "history_ttl": "300s",
+  "force_recovery": true
+}
+```
+
 ## Variables de entorno de la app web (lado Next)
 
 Además de las de Centrífugo, la app necesita (ver `web/lib/env.ts`):

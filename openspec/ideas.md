@@ -1,6 +1,8 @@
 
 ## Chat
 
+- El historial de chat solo muestra las ultimas 30/50 mensajes, nmo carga infinito.
+
 - Tengo varias conversaciones con el mismo número, debería ser un solo hilo de conversación siempre que sea el mismo numero. Además porque la ventanan de 24 horas se cierra en hilos anteriores.
 - Guardar el botón interactivo para reutilizarlo.
 - Asignar conversaciones a bots

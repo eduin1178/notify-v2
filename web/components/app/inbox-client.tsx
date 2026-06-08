@@ -2005,11 +2005,9 @@ function DownloadLink({
   outbound: boolean;
 }) {
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      download
+    <button
+      type="button"
+      onClick={() => downloadMedia(url, "audio")}
       className={cn(
         "inline-flex items-center gap-1.5 text-xs underline-offset-2 hover:underline",
         outbound ? "text-(--chat-out-foreground)/90" : "text-foreground",
@@ -2017,7 +2015,88 @@ function DownloadLink({
     >
       <DownloadSimpleIcon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
-    </a>
+    </button>
+  );
+}
+
+/**
+ * Descarga media cross-origin vía blob: el atributo `download` de un `<a>` se
+ * ignora en cross-origin (el navegador navega a la URL, y Chrome bloquea el
+ * dominio de R2 por parecerse a kapso.ai). Si CORS impide el `fetch`, abre la
+ * URL como respaldo.
+ */
+async function downloadMedia(url: string, filename: string): Promise<void> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    let name = filename || "archivo";
+    if (!/\.[a-z0-9]+$/i.test(name)) {
+      const ext = blob.type.split("/")[1]?.split(";")[0];
+      if (ext) name = `${name}.${ext}`;
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
+/**
+ * Imagen de la burbuja: al hacer clic abre un visor in-app (lightbox) en lugar
+ * de navegar a la URL de R2 (que Chrome bloquea por imitar a kapso.ai). La
+ * miniatura y el visor cargan la `<img>` como recurso (sin navegación ni CORS).
+ */
+function ImageBubble({ url, caption }: { url: string; caption: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block w-full cursor-zoom-in"
+        aria-label="Ver imagen"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={caption ?? "Imagen"}
+          className="max-h-80 w-full rounded-md object-cover"
+        />
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="gap-2 p-3 sm:max-w-3xl">
+          <DialogTitle className="sr-only">Imagen</DialogTitle>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={caption ?? "Imagen"}
+            className="max-h-[80vh] w-full rounded-md object-contain"
+          />
+          {caption && (
+            <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+              {caption}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => downloadMedia(url, "imagen")}
+            >
+              <DownloadSimpleIcon className="size-4" />
+              Descargar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -2032,17 +2111,9 @@ function MessageMedia({
   const url = message.mediaUrl;
 
   if (message.type === "image") {
-    // Llena la burbuja (estilo WhatsApp); abrir/descargar al hacer clic.
-    return (
-      <a href={url} target="_blank" rel="noreferrer" download className="block">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={url}
-          alt={message.caption ?? "Imagen"}
-          className="max-h-80 w-full rounded-md object-cover"
-        />
-      </a>
-    );
+    // Visor in-app (lightbox) en vez de navegar a R2 (Chrome lo bloquea por
+    // parecerse a kapso.ai). Llena la burbuja, estilo WhatsApp.
+    return <ImageBubble url={url} caption={message.caption} />;
   }
   if (message.type === "video") {
     return <video src={url} controls className="max-h-80 w-full rounded-md" />;
@@ -2059,13 +2130,11 @@ function MessageMedia({
   const label =
     message.filename ?? MEDIA_TYPE_LABEL[message.type] ?? "Archivo";
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      download
+    <button
+      type="button"
+      onClick={() => downloadMedia(url, label)}
       className={cn(
-        "mb-1 flex items-center gap-2 rounded-md border px-2.5 py-2",
+        "mb-1 flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left",
         outbound
           ? "border-(--chat-out-foreground)/20 hover:bg-(--chat-out-foreground)/10"
           : "border-border hover:bg-muted",
@@ -2073,7 +2142,7 @@ function MessageMedia({
     >
       <DownloadSimpleIcon className="size-5 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
-    </a>
+    </button>
   );
 }
 

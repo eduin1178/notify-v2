@@ -53,6 +53,7 @@ import type {
   InboxNumberDtoT,
   InboxSettingsDtoT,
   ListConversationsQueryT,
+  MessageDtoT,
   MessageThreadQueryT,
   MessageThreadResponseT,
   NotifyStatusT,
@@ -565,6 +566,30 @@ export async function sendServiceMessage(
 
   const outbound = toOutboundMessage(conversation.phoneNumber, input);
 
+  // Eco OPTIMISTA (experimental): publica a otros agentes ANTES de esperar a
+  // Kapso, con estado "sending" (relojito). El `clientMessageId` es temporal; el
+  // settle posterior lo reemplaza por el WAMID real. Para texto `input.text` es
+  // el cuerpo; para media, el caption (espejo de `toOutboundMessage`).
+  const isText = input.type === "text";
+  const clientMessageId = crypto.randomUUID();
+  const optimisticAt = new Date();
+  const optimisticMsg = outboundMessageDto({
+    wamid: clientMessageId,
+    type: input.type,
+    text: isText ? input.text : null,
+    caption: isText ? null : input.text,
+    mediaUrl: input.mediaUrl ?? null,
+    filename: input.filename ?? null,
+    at: optimisticAt,
+    status: "sending",
+  });
+  await safePublish(ctx, convChannel(conversation.id), {
+    type: "message.new",
+    conversationId: conversation.id,
+    at: optimisticAt.toISOString(),
+    message: optimisticMsg,
+  });
+
   let result: { messageId: string | null };
   try {
     result = await sendMessage(phoneNumberId, outbound);
@@ -573,6 +598,13 @@ export async function sendServiceMessage(
       conversationId,
       type: input.type,
       error: err instanceof Error ? err.message : String(err),
+    });
+    // Revierte el eco optimista en otros agentes (quita la burbuja con relojito).
+    await safePublish(ctx, convChannel(conversation.id), {
+      type: "message.failed",
+      conversationId: conversation.id,
+      replacesClientId: clientMessageId,
+      at: new Date().toISOString(),
     });
     throw DomainErrors.conflict(
       "No se pudo enviar el mensaje. Inténtalo de nuevo.",
@@ -601,13 +633,31 @@ export async function sendServiceMessage(
     });
   }
 
-  await publishOutboundEcho(
-    ctx,
-    conversation.id,
-    input.type,
-    result.messageId,
-    now,
-  );
+  // Settle: Kapso confirmó. Reemplaza la burbuja optimista por la real con el
+  // WAMID (clave de dedup contra el read-through) y estado "sent" (primer check).
+  const settled = outboundMessageDto({
+    wamid: result.messageId ?? clientMessageId,
+    type: input.type,
+    text: isText ? input.text : null,
+    caption: isText ? null : input.text,
+    mediaUrl: input.mediaUrl ?? null,
+    filename: input.filename ?? null,
+    at: optimisticAt,
+    status: "sent",
+  });
+  await safePublish(ctx, convChannel(conversation.id), {
+    type: "message.new",
+    conversationId: conversation.id,
+    at: new Date().toISOString(),
+    message: settled,
+    replacesClientId: clientMessageId,
+  });
+  // La lista (preview/reorden) se revalida tras el commit en BD.
+  await safePublish(ctx, orgChannel(ctx.currentOrg.id), {
+    type: "conversation.upsert",
+    conversationId: conversation.id,
+    at: new Date().toISOString(),
+  });
 
   const dto = await loadConversationDto(ctx, conversation.id);
   // El `wamid` (cuando Kapso lo confirma) viaja en la respuesta para que el
@@ -751,13 +801,15 @@ export async function sendInteractiveMessage(
     });
   }
 
-  await publishOutboundEcho(
-    ctx,
-    conversation.id,
-    "interactive",
-    result.messageId,
-    now,
-  );
+  const echo = result.messageId
+    ? outboundMessageDto({
+        wamid: result.messageId,
+        type: "interactive",
+        text: input.bodyText,
+        at: now,
+      })
+    : null;
+  await publishOutboundEcho(ctx, conversation.id, echo, now);
 
   return loadConversationDto(ctx, conversation.id);
 }
@@ -993,13 +1045,15 @@ export async function sendTemplateMessage(
     });
   }
 
-  await publishOutboundEcho(
-    ctx,
-    conversation.id,
-    "template",
-    result.messageId,
-    now,
-  );
+  const echo = result.messageId
+    ? outboundMessageDto({
+        wamid: result.messageId,
+        type: "template",
+        text: renderBody(dto, input),
+        at: now,
+      })
+    : null;
+  await publishOutboundEcho(ctx, conversation.id, echo, now);
 
   return loadConversationDto(ctx, conversation.id);
 }
@@ -1215,24 +1269,57 @@ async function safePublish(
 }
 
 /**
+ * Construye un `MessageDto` saliente para enriquecer el payload del realtime, de
+ * modo que OTROS agentes rendericen el mensaje al instante sin esperar el
+ * read-through. El `id` es el WAMID: así dedup-a contra el mensaje real del hilo
+ * y contra el eco optimista del emisor (reconciliación por `wamid`).
+ */
+function outboundMessageDto(params: {
+  wamid: string;
+  type: string;
+  text?: string | null;
+  caption?: string | null;
+  mediaUrl?: string | null;
+  filename?: string | null;
+  at: Date;
+  /** "sending" (relojito) para el eco optimista; "sent" (primer check) al settle. */
+  status?: string;
+}): MessageDtoT {
+  return {
+    id: params.wamid,
+    type: params.type,
+    direction: "outbound",
+    status: params.status ?? "sent",
+    timestamp: params.at.toISOString(),
+    text: params.text ?? null,
+    caption: params.caption ?? null,
+    mediaUrl: params.mediaUrl ?? null,
+    mediaContentType: null,
+    filename: params.filename ?? null,
+    transcript: null,
+    replyToId: null,
+  };
+}
+
+/**
  * Eco inmediato de un saliente (task 4.4): publica tras enviar para que OTROS
  * agentes de la org vean el mensaje sin esperar el webhook `message.sent`. El
- * propio emisor ya lo ve por el eco optimista (Change A); aquí el push solo
- * dispara revalidación de SWR. Best-effort vía `safePublish`.
+ * payload va enriquecido con el `MessageDto` (si hay WAMID) para render directo;
+ * el cliente igualmente revalida para reconciliar. Best-effort vía `safePublish`.
  */
 async function publishOutboundEcho(
   ctx: TenantServiceContext,
   conversationId: string,
-  messageType: string,
-  wamid: string | null,
+  message: MessageDtoT | null,
   at: Date,
 ): Promise<void> {
   await safePublish(ctx, convChannel(conversationId), {
     type: "message.new",
     conversationId,
-    wamid,
-    messageType,
+    wamid: message?.id ?? null,
+    messageType: message?.type ?? null,
     at: at.toISOString(),
+    ...(message ? { message } : {}),
   });
   await safePublish(ctx, orgChannel(ctx.currentOrg.id), {
     type: "conversation.upsert",
@@ -1529,6 +1616,26 @@ export async function ingestInboundMessage(
 
   // Realtime tras el commit (design D2/D4): la lista de la org se revalida
   // (conversation.upsert) y, si la conversación está abierta, su hilo (message.new).
+  // El payload del hilo va enriquecido con el `MessageDto` (si hay WAMID) para
+  // render directo; el cliente igualmente revalida (media inbound se resuelve por
+  // read-through, así que `mediaUrl` llega null y se completa al reconciliar).
+  const inboundMessage: MessageDtoT | null = wamid
+    ? {
+        id: wamid,
+        type,
+        direction: "inbound",
+        status: null,
+        timestamp: ts.toISOString(),
+        text,
+        caption: null,
+        mediaUrl: null,
+        mediaContentType: null,
+        filename: null,
+        transcript: null,
+        replyToId: null,
+      }
+    : null;
+
   await safePublish(deps, orgChannel(orgId), {
     type: "conversation.upsert",
     conversationId,
@@ -1540,6 +1647,7 @@ export async function ingestInboundMessage(
     wamid,
     messageType: type,
     at: ts.toISOString(),
+    ...(inboundMessage ? { message: inboundMessage } : {}),
   });
 }
 

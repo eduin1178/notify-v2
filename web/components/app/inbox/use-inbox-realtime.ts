@@ -2,10 +2,10 @@
 
 /**
  * Suscripción de realtime del inbox vía Centrífugo (change
- * `inbox-realtime-centrifugo`, design D6). El realtime es una SEÑAL: cada
- * publicación dispara `mutate()` de SWR (la fuente de verdad sigue siendo la
- * API). Degrada con gracia: si no hay `NEXT_PUBLIC_CENTRIFUGO_WS_URL` o el WS no
- * conecta, el inbox sigue con el polling de respaldo (T7.3).
+ * `inbox-realtime-centrifugo`, design D6). El realtime empuja el mensaje
+ * enriquecido (render directo) y revalida SWR para reconciliar. Degrada con
+ * gracia: si no hay `NEXT_PUBLIC_CENTRIFUGO_WS_URL` o el WS no conecta, el inbox
+ * sigue con el polling de respaldo (T7.3).
  *
  * Reglas de efectos del proyecto: NO se llama `setState` ni se mutan refs en
  * render. Las claves de SWR (que cambian con filtros/selección) se leen desde un
@@ -18,6 +18,10 @@ import { Centrifuge, type PublicationContext } from "centrifuge";
 import { useSWRConfig } from "swr";
 
 import { convChannel, orgChannel } from "@/lib/services/realtime/channels";
+import type {
+  MessageDtoT,
+  MessageThreadResponseT,
+} from "@/lib/services/inbox/schemas";
 
 // Pública: Next la inlinea en el bundle del cliente. Server `env.ts` no se
 // importa aquí (validaría secretos del servidor en el navegador).
@@ -51,8 +55,50 @@ async function fetchSubscriptionToken(
   return token;
 }
 
-function publicationType(pub: PublicationContext): string | undefined {
-  return (pub.data as { type?: string } | undefined)?.type;
+type InboxPublication = {
+  type?: string;
+  /** Mensaje completo para render directo (enriquecimiento del payload). */
+  message?: MessageDtoT;
+  /**
+   * Id temporal del eco optimista que este evento reemplaza/elimina (settle o
+   * failed). Permite cambiar la burbuja "sending" por la real sin duplicar.
+   */
+  replacesClientId?: string;
+};
+
+function publicationData(pub: PublicationContext): InboxPublication | undefined {
+  return pub.data as InboxPublication | undefined;
+}
+
+/**
+ * Inserta o actualiza el mensaje en la caché del hilo (newest-first). Si trae
+ * `replacesClientId`, primero quita la burbuja optimista temporal (settle). Si el
+ * `id` ya existe lo actualiza en sitio (p. ej. cambio de estado); si no, lo
+ * antepone. Dedup por `id` (= WAMID): convive con el read-through y con el eco
+ * optimista del emisor sin duplicar.
+ */
+function upsertMessageInThread(
+  cur: MessageThreadResponseT | undefined,
+  msg: MessageDtoT,
+  replacesClientId?: string,
+): MessageThreadResponseT {
+  const base = cur ?? { items: [], nextCursor: null };
+  let items = replacesClientId
+    ? base.items.filter((m) => m.id !== replacesClientId)
+    : base.items;
+  items = items.some((m) => m.id === msg.id)
+    ? items.map((m) => (m.id === msg.id ? msg : m))
+    : [msg, ...items];
+  return { ...base, items };
+}
+
+/** Quita un mensaje del hilo por id (revierte un eco optimista que falló). */
+function removeMessageFromThread(
+  cur: MessageThreadResponseT | undefined,
+  id: string,
+): MessageThreadResponseT {
+  const base = cur ?? { items: [], nextCursor: null };
+  return { ...base, items: base.items.filter((m) => m.id !== id) };
 }
 
 export function useInboxRealtime({
@@ -129,9 +175,28 @@ export function useInboxRealtime({
       });
     sub.on("publication", (pub) => {
       const { mutate: m, messagesKey: mk, conversationsKey: ck } = latest.current;
-      if (mk) m(mk);
-      const type = publicationType(pub);
-      if ((type === "delivery.update" || type === "message.new") && ck) {
+      const data = publicationData(pub);
+      if (mk) {
+        if (data?.type === "message.failed" && data.replacesClientId) {
+          const rcid = data.replacesClientId;
+          m(mk, (cur?: MessageThreadResponseT) => removeMessageFromThread(cur, rcid), {
+            revalidate: false,
+          });
+        } else if (data?.type === "message.new" && data.message) {
+          const msg = data.message;
+          const rcid = data.replacesClientId;
+          // Salientes (optimista/settle): NO revalidar para no parpadear si el
+          // read-through de Kapso aún no tiene el mensaje. Entrantes: revalidar
+          // para resolver la media por read-through.
+          const revalidate = msg.direction === "inbound";
+          m(mk, (cur?: MessageThreadResponseT) => upsertMessageInThread(cur, msg, rcid), {
+            revalidate,
+          });
+        } else {
+          m(mk);
+        }
+      }
+      if ((data?.type === "delivery.update" || data?.type === "message.new") && ck) {
         m(ck);
       }
     });

@@ -26,7 +26,10 @@
     },
     "namespaces": [
       {
-        "name": "notify_inbox"
+        "name": "notify_inbox",
+        "history_size": 100,
+        "history_ttl": "300s",
+        "force_recovery": true
       }
     ]
   },

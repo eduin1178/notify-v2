@@ -76,10 +76,26 @@ function createCentrifugoPublisher(
  * Devuelve el publicador real si Centrífugo está configurado, o el no-op en caso
  * contrario (degradación con gracia). Se llama al construir el `ctx`/deps.
  */
+let warnedNoConfig = false;
+
 export function resolveRealtimePublisher(
   logger: Logger = consoleLogger,
 ): RealtimePublisher {
   if (!env.CENTRIFUGO_API_URL || !env.CENTRIFUGO_API_KEY) {
+    // Aviso (una vez por proceso): sin estas variables NO se publica nada a
+    // Centrífugo. El navegador igual conecta el WS y se suscribe (usan
+    // NEXT_PUBLIC_CENTRIFUGO_WS_URL + CENTRIFUGO_TOKEN_HMAC_SECRET), pero nunca
+    // llegará una publicación → el inbox queda solo con el polling de respaldo.
+    if (!warnedNoConfig) {
+      warnedNoConfig = true;
+      logger.warn(
+        "[centrifugo] publish deshabilitado: faltan CENTRIFUGO_API_URL y/o CENTRIFUGO_API_KEY.",
+        {
+          hasApiUrl: Boolean(env.CENTRIFUGO_API_URL),
+          hasApiKey: Boolean(env.CENTRIFUGO_API_KEY),
+        },
+      );
+    }
     return noopRealtimePublisher;
   }
   return createCentrifugoPublisher(
