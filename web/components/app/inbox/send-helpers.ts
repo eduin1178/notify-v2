@@ -4,6 +4,26 @@
  * para reutilizarlos desde los módulos del composer sin duplicar lógica.
  */
 
+/**
+ * Extrae un mensaje legible del cuerpo de error de la API. La forma canónica es
+ * `{ error: { code, message, issues? } }` (ver `lib/api/errors.ts`), por lo que
+ * el mensaje vive en `error.message`. Antes se leía `data.error` directamente y,
+ * al ser un objeto, `new Error(objeto)` producía el literal "[object Object]".
+ */
+function extractApiErrorMessage(data: unknown): string {
+  if (data && typeof data === "object") {
+    const d = data as Record<string, unknown>;
+    const err = d.error;
+    if (err && typeof err === "object") {
+      const m = (err as Record<string, unknown>).message;
+      if (typeof m === "string" && m.trim()) return m;
+    }
+    if (typeof err === "string" && err.trim()) return err;
+    if (typeof d.message === "string" && d.message.trim()) return d.message;
+  }
+  return "No se pudo completar la operación.";
+}
+
 /** POST que ignora el cuerpo de respuesta; lanza el mensaje de error del dominio. */
 export async function sendMessageRequest(
   url: string,
@@ -17,10 +37,7 @@ export async function sendMessageRequest(
   });
   if (res.ok) return;
   const data = await res.json().catch(() => null);
-  const message =
-    (data && (data.message || data.error)) ||
-    "No se pudo completar la operación.";
-  throw new Error(message);
+  throw new Error(extractApiErrorMessage(data));
 }
 
 /** Igual que `sendMessageRequest` pero devuelve el JSON de respuesta. */
@@ -36,10 +53,7 @@ export async function sendMessageRequestJson(
   });
   const data = await res.json().catch(() => null);
   if (res.ok) return data;
-  const message =
-    (data && (data.message || data.error)) ||
-    "No se pudo completar la operación.";
-  throw new Error(message);
+  throw new Error(extractApiErrorMessage(data));
 }
 
 /** Resultado de presignar y subir un archivo al almacenamiento de blobs. */

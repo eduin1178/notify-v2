@@ -210,4 +210,14 @@
     @apply bg-background text-foreground;
     letter-spacing: var(--tracking-normal);
   }
+
+  /* Radix ScrollArea envuelve el contenido en un div con
+     `display:table; min-width:100%`, lo que dimensiona el contenido a su propio
+     ancho y rompe el truncado (`text-overflow: ellipsis`) de los hijos: el texto
+     largo se extiende más allá del viewport en vez de cortarse con "…". Forzar
+     ese contenedor a `block` mantiene el scroll vertical y permite que
+     `truncate` + `min-w-0` funcionen dentro del ScrollArea. */
+  [data-slot="scroll-area-viewport"] > div {
+    display: block !important;
+  }
 }

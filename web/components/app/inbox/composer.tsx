@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ConversationDtoT } from "@/lib/services/inbox/schemas";
 
 import { AudioRecorder } from "./audio-recorder";
-import { sendMessageRequest, uploadToBlob } from "./send-helpers";
+import { sendMessageRequestJson, uploadToBlob } from "./send-helpers";
 import type { AttachmentDraft } from "./use-attachment-draft";
 
 /** Tipos de archivo aceptados por el composer, por categoría. */
@@ -25,11 +25,31 @@ const ACCEPT_ALL =
 
 const MAX_TEXTAREA_PX = 160;
 
+/** Etiqueta de respaldo para la burbuja optimista de media sin caption. */
+const MEDIA_LABEL: Record<string, string> = {
+  image: "Imagen",
+  video: "Video",
+  audio: "Audio",
+  document: "Documento",
+};
+
+/** Datos mínimos para pintar una burbuja optimista en el hilo. */
+type OptimisticInput = {
+  type: string;
+  text?: string | null;
+  caption?: string | null;
+  mediaUrl?: string | null;
+  filename?: string | null;
+};
+
 export function Composer({
   orgId,
   conversation,
   draft,
   onSent,
+  onOptimisticAdd,
+  onOptimisticSettle,
+  onOptimisticFail,
   onOpenTemplate,
   onOpenInteractive,
 }: {
@@ -37,6 +57,12 @@ export function Composer({
   conversation: ConversationDtoT;
   draft: AttachmentDraft;
   onSent: () => void;
+  /** Añade el eco optimista y devuelve su id temporal. */
+  onOptimisticAdd?: (input: OptimisticInput) => string;
+  /** Confirma el `wamid` del envío para reconciliar por id. */
+  onOptimisticSettle?: (tempId: string, wamid: string | null) => void;
+  /** Revierte el eco si el envío falla. */
+  onOptimisticFail?: (tempId: string) => void;
   onOpenTemplate: () => void;
   onOpenInteractive: () => void;
 }) {
@@ -54,12 +80,10 @@ export function Composer({
   const showMic = !text.trim() && !attachment;
 
   if (!conversation.windowOpen) {
+    // El estado de ventana cerrada ya se indica en el encabezado del chat
+    // ("Ventana cerrada"); aquí basta con la acción para enviar una plantilla.
     return (
-      <footer className="space-y-2 border-t p-3">
-        <p className="rounded-md bg-muted px-3 py-2.5 text-center text-xs text-muted-foreground">
-          La ventana de 24 horas está cerrada. Solo puedes escribir mediante una
-          plantilla.
-        </p>
+      <footer className="border-t p-3">
         <Button
           type="button"
           variant="outline"
@@ -84,47 +108,95 @@ export function Composer({
     if (textRef.current) textRef.current.style.height = "auto";
   }
 
-  async function send() {
-    if (sending) return;
-    const value = text.trim();
-    if (!attachment && !value) return;
+  /**
+   * Texto: envío SIN bloqueo (fire-and-forget). El eco optimista (reloj) da el
+   * feedback inmediato, así que el input queda libre y enfocado para seguir
+   * escribiendo —como en WhatsApp—, sin esperar el round-trip al servidor.
+   */
+  async function sendText(value: string) {
+    setError(null);
+    const tempId = onOptimisticAdd?.({ type: "text", text: value });
+    try {
+      const res = (await sendMessageRequestJson(base, {
+        type: "text",
+        text: value,
+      })) as { wamid?: string | null };
+      if (tempId) onOptimisticSettle?.(tempId, res?.wamid ?? null);
+      onSent();
+    } catch (e) {
+      if (tempId) onOptimisticFail?.(tempId);
+      setError(e instanceof Error ? e.message : "No se pudo enviar el mensaje.");
+    }
+  }
+
+  /**
+   * Media/audio: envío CON bloqueo. Hay un único adjunto en preparación y una
+   * subida en curso; permitir adjuntos concurrentes requeriría una cola (fuera
+   * de alcance). El texto acompaña como caption.
+   */
+  async function sendAttachment(value: string) {
+    if (!attachment) return;
     setSending(true);
     setError(null);
+    const tempId = onOptimisticAdd?.({
+      type: attachment.kind,
+      text:
+        value ||
+        attachment.file.name ||
+        MEDIA_LABEL[attachment.kind] ||
+        "Archivo",
+    });
     try {
-      if (attachment) {
-        const { publicUrl, category } = await uploadToBlob(
-          orgId,
-          attachment.file,
-        );
-        await sendMessageRequest(base, {
-          type: category,
-          mediaUrl: publicUrl,
-          // El audio no admite caption; el resto usa el texto como caption.
-          ...(category !== "audio" && value ? { text: value } : {}),
-          ...(category === "document" ? { filename: attachment.file.name } : {}),
-        });
-        draft.clear();
-      } else {
-        await sendMessageRequest(base, { type: "text", text: value });
-      }
+      const { publicUrl, category } = await uploadToBlob(orgId, attachment.file);
+      const res = (await sendMessageRequestJson(base, {
+        type: category,
+        mediaUrl: publicUrl,
+        // El audio no admite caption; el resto usa el texto como caption.
+        ...(category !== "audio" && value ? { text: value } : {}),
+        ...(category === "document" ? { filename: attachment.file.name } : {}),
+      })) as { wamid?: string | null };
+      if (tempId) onOptimisticSettle?.(tempId, res?.wamid ?? null);
+      draft.clear();
       resetText();
       onSent();
     } catch (e) {
+      if (tempId) onOptimisticFail?.(tempId);
       setError(e instanceof Error ? e.message : "No se pudo enviar el mensaje.");
     } finally {
       setSending(false);
     }
   }
 
+  function send() {
+    const value = text.trim();
+    if (attachment) {
+      if (sending) return;
+      void sendAttachment(value);
+      return;
+    }
+    if (!value) return;
+    // Limpia y reenfoca de inmediato para seguir escribiendo; dispara en segundo
+    // plano (el texto no bloquea el composer).
+    resetText();
+    textRef.current?.focus();
+    void sendText(value);
+  }
+
   async function sendAudio(file: File) {
     setSending(true);
     setError(null);
+    const tempId = onOptimisticAdd?.({ type: "audio", text: MEDIA_LABEL.audio });
     try {
       const { publicUrl, category } = await uploadToBlob(orgId, file);
-      await sendMessageRequest(base, { type: category, mediaUrl: publicUrl });
+      const res = (await sendMessageRequestJson(base, {
+        type: category,
+        mediaUrl: publicUrl,
+      })) as { wamid?: string | null };
+      if (tempId) onOptimisticSettle?.(tempId, res?.wamid ?? null);
       setAudioMode(false);
       onSent();
     } catch (e) {
+      if (tempId) onOptimisticFail?.(tempId);
       setError(e instanceof Error ? e.message : "No se pudo enviar el audio.");
     } finally {
       setSending(false);

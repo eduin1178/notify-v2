@@ -5,6 +5,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { getThemeCookie } from "@/lib/theme/cookie";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/script";
+import { Analytics } from "@vercel/analytics/next"
 
 const inter = Inter({
   variable: "--font-inter",
@@ -49,6 +50,7 @@ export default async function RootLayout({
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
+        <Analytics />
       </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

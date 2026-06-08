@@ -184,6 +184,17 @@ export const SendServiceMessageInput = z
     }
   });
 
+/**
+ * Respuesta del envío de servicio: la conversación actualizada más el `wamid`
+ * del mensaje creado (cuando Kapso lo provee). El `wamid` permite reconciliar el
+ * eco optimista del cliente con el mensaje real (read-through) por id, sin
+ * duplicados. Extiende `ConversationDto` de forma aditiva (los consumidores que
+ * solo esperaban la conversación siguen funcionando).
+ */
+export const SendServiceMessageResponse = ConversationDto.extend({
+  wamid: z.string().nullable(),
+});
+
 /** Solicitud de URL firmada para subir un archivo directo a R2. */
 export const PresignUploadInput = z.object({
   contentType: z.string().min(1).max(255),
@@ -370,6 +381,9 @@ export type UpdateInboxSettingsInputT = z.infer<typeof UpdateInboxSettingsInput>
 export type ServiceMessageTypeT = z.infer<typeof ServiceMessageType>;
 export type MediaCategoryT = z.infer<typeof MediaCategory>;
 export type SendServiceMessageInputT = z.infer<typeof SendServiceMessageInput>;
+export type SendServiceMessageResponseT = z.infer<
+  typeof SendServiceMessageResponse
+>;
 export type PresignUploadInputT = z.infer<typeof PresignUploadInput>;
 export type PresignUploadResponseT = z.infer<typeof PresignUploadResponse>;
 export type TemplateHeaderFormatT = z.infer<typeof TemplateHeaderFormat>;

@@ -31,10 +31,14 @@ export function AppShell({ children, ...sidebarProps }: Props) {
             flex, sin `calc` ni desbordes de la ventana. El scroll vive dentro
             del hilo/lista. El resto de vistas conservan el flujo normal. */}
         <SidebarInset className={cn(fullBleed && "h-svh overflow-hidden")}>
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-          </header>
+          {/* El inbox oculta el header global para liberar el alto al layout de
+              3 columnas; su `SidebarTrigger` vive en la barra de la lista. */}
+          {!fullBleed && (
+            <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+              <SidebarTrigger className="-ml-1" />
+              <Separator orientation="vertical" className="mr-2 h-4" />
+            </header>
+          )}
           {fullBleed ? (
             <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
           ) : (

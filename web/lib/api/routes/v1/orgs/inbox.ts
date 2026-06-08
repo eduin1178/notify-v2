@@ -19,6 +19,7 @@ import {
   PresignUploadResponse,
   SendInteractiveInput,
   SendServiceMessageInput,
+  SendServiceMessageResponse,
   SendTemplateInput,
   StartConversationInput,
   TemplatesQuery,
@@ -153,8 +154,10 @@ const sendMessageRoute = createRoute({
   },
   responses: {
     200: {
-      description: "Conversación actualizada tras el envío.",
-      content: { "application/json": { schema: ConversationDto } },
+      description: "Conversación actualizada tras el envío (incluye `wamid`).",
+      content: {
+        "application/json": { schema: SendServiceMessageResponse },
+      },
     },
     409: { description: "Ventana de 24h cerrada (usar plantilla)." },
     422: { description: "Mensaje inválido." },

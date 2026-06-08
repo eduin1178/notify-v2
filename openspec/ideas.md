@@ -1,15 +1,17 @@
 
 ## Chat
 
-7. Tengo varias conversaciones con el mismo número, debería ser un solo hilo de conversación siempre que sea el mismo numero. Además porque la ventanan de 24 horas se cierra en hilos anteriores.
-8. Guardar el botón interactivo para reutilizarlo.
+- Tengo varias conversaciones con el mismo número, debería ser un solo hilo de conversación siempre que sea el mismo numero. Además porque la ventanan de 24 horas se cierra en hilos anteriores.
+- Guardar el botón interactivo para reutilizarlo.
+- Asignar conversaciones a bots
 
+- Puede ser necesario manejar bien una cola para evitar entrecruzamiento de mensajes. Cuando se envian muy rapido se entrecruzan.
 
-11. Asignar conversaciones a bots
+## Dashboard
+- Mostrar la cantidad de mensajes entrantes y salientes por cada número de telpefono.
 
 ## Otras Pendientes
 
-- Implementar Realtime para el chat usando centrifugus en lugar de SSE.
 - Pendiente mejorar experiencia de invitación cuando se supera el plan
 - UI para gestion de planes y features en el super-admin
 - Impersonacion de usuarios
@@ -19,4 +21,4 @@
 
 
 ## No olvidar
-1. Llegar a la implementación concreta de las features de suscripciones y facturacion, pues lo que se implemento fue solo una abstraccion con su respectiva implementacion por defecto.
+- Llegar a la implementación concreta de las features de suscripciones y facturacion, pues lo que se implemento fue solo una abstraccion con su respectiva implementacion por defecto.

@@ -59,6 +59,7 @@ import type {
   ReopenBehaviorT,
   SendInteractiveInputT,
   SendServiceMessageInputT,
+  SendServiceMessageResponseT,
   SendTemplateInputT,
   StartConversationInputT,
   TemplateDtoT,
@@ -537,7 +538,7 @@ export async function sendServiceMessage(
   ctx: TenantServiceContext,
   conversationId: string,
   input: SendServiceMessageInputT,
-): Promise<ConversationDtoT> {
+): Promise<SendServiceMessageResponseT> {
   const conversation = await loadOwnedConversation(ctx, conversationId);
 
   if (!isWindowOpen(conversation.lastInboundAt, new Date())) {
@@ -598,7 +599,10 @@ export async function sendServiceMessage(
     });
   }
 
-  return loadConversationDto(ctx, conversation.id);
+  const dto = await loadConversationDto(ctx, conversation.id);
+  // El `wamid` (cuando Kapso lo confirma) viaja en la respuesta para que el
+  // cliente reconcilie su eco optimista con el mensaje real por id.
+  return { ...dto, wamid: result.messageId };
 }
 
 /**

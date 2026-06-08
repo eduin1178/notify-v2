@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Assets minificados de terceros (p. ej. el worker WASM de opus en
+    // `public/opus/`): no son código del proyecto y no deben lintarse.
+    "**/*.min.js",
   ]),
 ]);
 

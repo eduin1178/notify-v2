@@ -22,6 +22,7 @@ import {
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Dialog,
   DialogClose,
@@ -64,6 +65,15 @@ type Tab = "todas" | "sin-leer";
 type MemberLite = { userId: string; name: string };
 type MembersResponse = { members: MemberLite[] };
 
+/** Mensaje saliente mostrado de inmediato (eco optimista) antes de confirmarse. */
+type OptimisticMessage = {
+  tempId: string;
+  /** WAMID devuelto por el envío; clave de reconciliación con el hilo real. */
+  wamid: string | null;
+  createdAt: number;
+  message: MessageDtoT;
+};
+
 type Props = {
   orgId: string;
   numbers: InboxNumberDtoT[];
@@ -97,13 +107,41 @@ function fmtTime(iso: string | null): string {
   });
 }
 
-function fmtRemaining(iso: string | null): string | null {
+/**
+ * Marca de tiempo del último mensaje para la lista, estilo WhatsApp: hoy → hora,
+ * ayer → "Ayer", en la última semana → día abreviado, más antiguo → fecha corta.
+ * Vacío si no hay último mensaje (conversación proactiva o envío fallido).
+ */
+function fmtListTime(iso: string | null, nowMs: number): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date(nowMs);
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+  }
+  const yesterday = new Date(nowMs - 86_400_000);
+  if (d.toDateString() === yesterday.toDateString()) return "Ayer";
+  if (nowMs - d.getTime() < 7 * 86_400_000) {
+    return d.toLocaleDateString("es", { weekday: "short" });
+  }
+  return d.toLocaleDateString("es", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
+}
+
+function fmtRemaining(
+  iso: string | null,
+  nowMs: number,
+  compact = false,
+): string | null {
   if (!iso) return null;
-  const ms = new Date(iso).getTime() - Date.now();
+  const ms = new Date(iso).getTime() - nowMs;
   if (ms <= 0) return null;
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
-  return `${h}h ${m}m restantes`;
+  return compact ? `${h}h ${m}m` : `${h}h ${m}m restantes`;
 }
 
 function displayName(conv: ConversationDtoT): string {
@@ -182,6 +220,64 @@ export function InboxClient({
     setFlash(true);
     flashTimer.current = setTimeout(() => setFlash(false), 600);
   }
+  // "Tick" de 60s: refresca el restante de la ventana de 24h sin depender del
+  // polling de datos (el tiempo pasa aunque no lleguen mensajes nuevos).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Eco optimista: salientes mostrados de inmediato (estado "sending" con reloj)
+  // hasta que el mensaje real (read-through de Kapso) aparece en el hilo y se
+  // reconcilia por `wamid` (o por heurística si Kapso no devuelve id).
+  const [optimistics, setOptimistics] = useState<OptimisticMessage[]>([]);
+  const optimisticSeq = useRef(0);
+
+  function addOptimistic(input: {
+    type: string;
+    text?: string | null;
+    caption?: string | null;
+    mediaUrl?: string | null;
+    filename?: string | null;
+  }): string {
+    const tempId = `optimistic-${optimisticSeq.current++}`;
+    const message: MessageDtoT = {
+      id: tempId,
+      type: input.type,
+      direction: "outbound",
+      status: "sending",
+      timestamp: new Date().toISOString(),
+      text: input.text ?? null,
+      caption: input.caption ?? null,
+      mediaUrl: input.mediaUrl ?? null,
+      mediaContentType: null,
+      filename: input.filename ?? null,
+      transcript: null,
+      replyToId: null,
+    };
+    setOptimistics((prev) => [
+      // Poda los ya reconciliados o vencidos (>60s) al insertar uno nuevo: evita
+      // crecer sin fin sin necesitar un efecto con setState (prohibido por lint).
+      ...prev.filter(
+        (o) => !isReconciled(o) && Date.now() - o.createdAt < 60_000,
+      ),
+      { tempId, wamid: null, createdAt: Date.now(), message },
+    ]);
+    return tempId;
+  }
+
+  /** Marca el `wamid` confirmado por el envío (la burbuja sigue hasta reconciliar). */
+  function settleOptimistic(tempId: string, wamid: string | null) {
+    setOptimistics((prev) =>
+      prev.map((o) => (o.tempId === tempId ? { ...o, wamid } : o)),
+    );
+  }
+
+  /** Revierte la burbuja optimista si el envío falló. */
+  function failOptimistic(tempId: string) {
+    setOptimistics((prev) => prev.filter((o) => o.tempId !== tempId));
+  }
 
   const conversationsKey = useMemo(() => {
     if (!connectionId) return null;
@@ -246,6 +342,36 @@ export function InboxClient({
   const messages = useMemo(
     () => [...(msgData?.items ?? [])].reverse(),
     [msgData],
+  );
+
+  const messageIds = useMemo(
+    () => new Set(messages.map((m) => m.id)),
+    [messages],
+  );
+
+  /** ¿La burbuja optimista ya tiene su mensaje real en el hilo? */
+  function isReconciled(o: OptimisticMessage): boolean {
+    if (o.wamid) return messageIds.has(o.wamid);
+    // Sin `wamid`: heurística por saliente real con mismo tipo y texto/caption.
+    return messages.some(
+      (m) =>
+        m.direction === "outbound" &&
+        m.type === o.message.type &&
+        (m.text ?? "") === (o.message.text ?? "") &&
+        (m.caption ?? "") === (o.message.caption ?? ""),
+    );
+  }
+
+  // Optimistas aún sin reflejar en el hilo (se concatenan al final del hilo).
+  const pendingOptimistics = useMemo(
+    () => optimistics.filter((o) => !isReconciled(o)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [optimistics, messages, messageIds],
+  );
+
+  const threadMessages = useMemo(
+    () => [...messages, ...pendingOptimistics.map((o) => o.message)],
+    [messages, pendingOptimistics],
   );
 
   const unreadTotal = (convData?.items ?? []).reduce(
@@ -352,7 +478,7 @@ export function InboxClient({
       '[data-slot="scroll-area-viewport"]',
     );
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
-  }, [selectedId, messages.length]);
+  }, [selectedId, threadMessages.length]);
 
   /** Descarta el borrador de adjunto al cambiar de conversación o número. */
   function resetDraft() {
@@ -465,6 +591,9 @@ export function InboxClient({
       <aside className="flex w-80 shrink-0 flex-col border-r">
         <div className="space-y-3 border-b p-3">
           <div className="flex items-center gap-2">
+            {/* El inbox oculta el header global del shell; el control de
+                expandir/contraer el sidebar vive aquí, en la barra de la lista. */}
+            <SidebarTrigger className="-ml-1 shrink-0" />
             <NativeSelect
               value={connectionId}
               onChange={(e) => {
@@ -581,6 +710,17 @@ export function InboxClient({
             <ul>
               {conversations.map((conv) => {
                 const name = displayName(conv);
+                const unread = conv.unreadCount > 0;
+                const expired = !conv.windowOpen;
+                const remaining = fmtRemaining(
+                  conv.windowClosesAt,
+                  nowMs,
+                  true,
+                );
+                // Última actividad: último mensaje o, en su defecto, último
+                // entrante (p. ej. cuando una plantilla saliente falló y no
+                // quedó preview).
+                const activityAt = conv.lastMessageAt ?? conv.lastInboundAt;
                 return (
                   <li key={conv.id}>
                     <button
@@ -591,27 +731,72 @@ export function InboxClient({
                         selectedId === conv.id && "bg-muted",
                       )}
                     >
-                      <Avatar className="size-9 shrink-0">
+                      {/* Borde del avatar = estado de negocio: verde abierta,
+                          ámbar pendiente, gris cerrada (fino, ring-1). */}
+                      <Avatar
+                        className={cn(
+                          "size-9 shrink-0 ring-1",
+                          conv.notifyStatus === "abierta"
+                            ? "ring-green-500"
+                            : conv.notifyStatus === "pendiente"
+                              ? "ring-amber-500"
+                              : "ring-border",
+                        )}
+                      >
                         <AvatarFallback>{initials(name)}</AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-sm font-medium">
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-sm",
+                              unread ? "font-bold" : "font-medium",
+                            )}
+                          >
                             {name}
                           </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {fmtTime(conv.lastMessageAt)}
+                          <span
+                            className="shrink-0 text-xs text-muted-foreground"
+                            title={
+                              activityAt
+                                ? new Date(activityAt).toLocaleString("es")
+                                : undefined
+                            }
+                          >
+                            {fmtListTime(activityAt, nowMs)}
                           </span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-xs text-muted-foreground">
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-xs",
+                              unread
+                                ? "font-bold text-foreground"
+                                : "text-muted-foreground",
+                            )}
+                            title={conv.lastMessageText ?? ""}
+                          >
                             {conv.lastMessageText ?? "—"}
                           </span>
-                          {conv.unreadCount > 0 && (
-                            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-[11px] font-medium text-white">
-                              {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
-                            </span>
-                          )}
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {expired ? (
+                              <span
+                                title="Ventana de 24 horas cerrada"
+                                className="text-red-500"
+                              >
+                                <ClockIcon className="size-3.5" />
+                              </span>
+                            ) : remaining ? (
+                              <span className="text-[11px] text-muted-foreground">
+                                {remaining}
+                              </span>
+                            ) : null}
+                            {unread && (
+                              <span className="flex size-5 items-center justify-center rounded-full bg-green-600 text-[11px] font-medium text-white">
+                                {conv.unreadCount > 9 ? "9+" : conv.unreadCount}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </button>
@@ -654,26 +839,35 @@ export function InboxClient({
                 flash && "bg-primary/5",
               )}
             >
-              <div className="flex min-w-0 items-center gap-3">
-                <Avatar className="size-9">
+              {/* Toda el área (avatar + nombre + número) alterna el panel. */}
+              <button
+                type="button"
+                onClick={() => setInfoOpen((v) => !v)}
+                className="flex min-w-0 items-center gap-3 text-left"
+                aria-label="Ver datos del contacto"
+              >
+                <Avatar className="size-9 shrink-0">
                   <AvatarFallback>
                     {initials(displayName(selected))}
                   </AvatarFallback>
                 </Avatar>
-                <button
-                  type="button"
-                  onClick={() => setInfoOpen((v) => !v)}
-                  className="min-w-0 text-left"
-                  aria-label="Ver datos del contacto"
-                >
+                <div className="min-w-0">
                   <p className="truncate text-sm font-medium hover:underline">
                     {displayName(selected)}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
                     {selected.phoneNumber ?? ""}
+                    {selected.windowOpen
+                      ? fmtRemaining(selected.windowClosesAt, nowMs)
+                        ? ` · ${fmtRemaining(selected.windowClosesAt, nowMs)}`
+                        : ""
+                      : null}
+                    {!selected.windowOpen && (
+                      <span className="text-red-600"> · Ventana cerrada</span>
+                    )}
                   </p>
-                </button>
-              </div>
+                </div>
+              </button>
               <div className="flex shrink-0 items-center gap-2">
                 <Button
                   type="button"
@@ -711,37 +905,22 @@ export function InboxClient({
               </div>
             </header>
 
-            <div className="border-b bg-muted/30 px-4 py-2">
-              {selected.windowOpen ? (
-                <p className="flex items-center gap-1.5 text-xs text-green-700 dark:text-green-500">
-                  <ClockIcon className="size-3.5" />
-                  Ventana de servicio abierta
-                  {fmtRemaining(selected.windowClosesAt)
-                    ? ` — ${fmtRemaining(selected.windowClosesAt)}`
-                    : ""}
-                </p>
-              ) : (
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <ClockIcon className="size-3.5" />
-                  Ventana de 24h cerrada. Solo puedes enviar plantillas.
-                </p>
-              )}
-            </div>
-
             <ScrollArea className="min-h-0 flex-1 bg-(--chat-bg)">
               <div className="space-y-2 p-4">
-              {msgLoading && messages.length === 0 ? (
+              {msgLoading && threadMessages.length === 0 ? (
                 <div className="space-y-2">
                   {Array.from({ length: 5 }).map((_, i) => (
                     <Skeleton key={i} className="h-12 w-2/3" />
                   ))}
                 </div>
-              ) : messages.length === 0 ? (
+              ) : threadMessages.length === 0 ? (
                 <p className="py-10 text-center text-sm text-muted-foreground">
                   No hay mensajes en esta conversación.
                 </p>
               ) : (
-                messages.map((m) => <MessageBubble key={m.id} message={m} />)
+                threadMessages.map((m) => (
+                  <MessageBubble key={m.id} message={m} />
+                ))
               )}
               <div ref={bottomRef} />
               </div>
@@ -752,6 +931,9 @@ export function InboxClient({
               conversation={selected}
               draft={draft}
               onSent={afterSend}
+              onOptimisticAdd={addOptimistic}
+              onOptimisticSettle={settleOptimistic}
+              onOptimisticFail={failOptimistic}
               onOpenTemplate={() =>
                 setTemplateTarget({
                   conversationId: selected.id,
@@ -1766,6 +1948,14 @@ const DELIVERY_LABEL: Record<string, string> = {
 /** Marca de entrega para mensajes salientes (✓ / ✓✓ / leído / fallido). */
 function DeliveryStatus({ status }: { status: string | null }) {
   if (!status) return null;
+  // Eco optimista: aún enviándose → reloj (no el primer check), estilo WhatsApp.
+  if (status === "sending") {
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <ClockIcon className="size-3" />
+      </span>
+    );
+  }
   const label = DELIVERY_LABEL[status] ?? status;
   if (status === "failed") {
     return (
