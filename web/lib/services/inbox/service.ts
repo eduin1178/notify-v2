@@ -36,6 +36,8 @@ import type { TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import type { Logger } from "@/lib/services/logger";
 import { normalizePhone } from "@/lib/services/contacts/phone";
+import { convChannel, orgChannel } from "@/lib/services/realtime/channels";
+import type { RealtimePublisher } from "@/lib/services/realtime/ports";
 import {
   recordConversationWindow,
   recordMessageUsage,
@@ -599,6 +601,14 @@ export async function sendServiceMessage(
     });
   }
 
+  await publishOutboundEcho(
+    ctx,
+    conversation.id,
+    input.type,
+    result.messageId,
+    now,
+  );
+
   const dto = await loadConversationDto(ctx, conversation.id);
   // El `wamid` (cuando Kapso lo confirma) viaja en la respuesta para que el
   // cliente reconcilie su eco optimista con el mensaje real por id.
@@ -740,6 +750,14 @@ export async function sendInteractiveMessage(
       direction: "outbound",
     });
   }
+
+  await publishOutboundEcho(
+    ctx,
+    conversation.id,
+    "interactive",
+    result.messageId,
+    now,
+  );
 
   return loadConversationDto(ctx, conversation.id);
 }
@@ -975,6 +993,14 @@ export async function sendTemplateMessage(
     });
   }
 
+  await publishOutboundEcho(
+    ctx,
+    conversation.id,
+    "template",
+    result.messageId,
+    now,
+  );
+
   return loadConversationDto(ctx, conversation.id);
 }
 
@@ -1159,7 +1185,61 @@ export async function updateInboxSettings(
 
 // ── Ingestión por webhook ────────────────────────────────────────────────────
 
-export type InboxWebhookDeps = { db: Db; logger: Logger };
+export type InboxWebhookDeps = {
+  db: Db;
+  logger: Logger;
+  /** Puerto de realtime; no-op si Centrífugo no está configurado (design D1/D2). */
+  realtime: RealtimePublisher;
+};
+
+/**
+ * Publica un evento de realtime best-effort tras un commit. Cualquier fallo se
+ * registra y se traga: NO debe propagarse (design D2). El adaptador ya captura
+ * sus propios errores; este try/catch es una salvaguarda extra del puerto (p. ej.
+ * una implementación que sí lance). Acepta tanto los `deps` del webhook como el
+ * `ctx` de las rutas (ambos exponen `realtime` + `logger`).
+ */
+async function safePublish(
+  source: { realtime: RealtimePublisher; logger: Logger },
+  channel: string,
+  data: unknown,
+): Promise<void> {
+  try {
+    await source.realtime.publish(channel, data);
+  } catch (err) {
+    source.logger.warn("[inbox] publish de realtime falló", {
+      channel,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Eco inmediato de un saliente (task 4.4): publica tras enviar para que OTROS
+ * agentes de la org vean el mensaje sin esperar el webhook `message.sent`. El
+ * propio emisor ya lo ve por el eco optimista (Change A); aquí el push solo
+ * dispara revalidación de SWR. Best-effort vía `safePublish`.
+ */
+async function publishOutboundEcho(
+  ctx: TenantServiceContext,
+  conversationId: string,
+  messageType: string,
+  wamid: string | null,
+  at: Date,
+): Promise<void> {
+  await safePublish(ctx, convChannel(conversationId), {
+    type: "message.new",
+    conversationId,
+    wamid,
+    messageType,
+    at: at.toISOString(),
+  });
+  await safePublish(ctx, orgChannel(ctx.currentOrg.id), {
+    type: "conversation.upsert",
+    conversationId,
+    at: at.toISOString(),
+  });
+}
 
 /** Payload de `whatsapp.message.received` (subset tolerante de Kapso v2). */
 export type InboundMessagePayload = {
@@ -1383,7 +1463,10 @@ export async function ingestInboundMessage(
 
   const newWindow = opensNewWindow(existing?.lastInboundAt ?? null, ts);
 
+  let conversationId: string;
+
   if (existing) {
+    conversationId = existing.id;
     let status = existing.notifyStatus;
     let assignedUserId: string | null = existing.assignedUserId;
 
@@ -1415,8 +1498,9 @@ export async function ingestInboundMessage(
       })
       .where(eq(schema.conversation.id, existing.id));
   } else {
+    conversationId = crypto.randomUUID();
     await deps.db.insert(schema.conversation).values({
-      id: crypto.randomUUID(),
+      id: conversationId,
       organizationId: orgId,
       whatsappConnectionId: connection.id,
       contactId,
@@ -1442,6 +1526,21 @@ export async function ingestInboundMessage(
   if (newWindow) {
     await recordConversationWindow(deps.db, orgId);
   }
+
+  // Realtime tras el commit (design D2/D4): la lista de la org se revalida
+  // (conversation.upsert) y, si la conversación está abierta, su hilo (message.new).
+  await safePublish(deps, orgChannel(orgId), {
+    type: "conversation.upsert",
+    conversationId,
+    at: ts.toISOString(),
+  });
+  await safePublish(deps, convChannel(conversationId), {
+    type: "message.new",
+    conversationId,
+    wamid,
+    messageType: type,
+    at: ts.toISOString(),
+  });
 }
 
 /** Error de entrega tal como lo entrega Meta/Kapso (subset tolerante). */
@@ -1495,15 +1594,43 @@ export async function ingestDeliveryStatus(
 ): Promise<void> {
   const wamid = payload.message?.id ?? null;
   const status = payload.message?.kapso?.status ?? payload.status ?? null;
+  const reason = status === "failed" ? failureReasonOf(payload) : null;
 
   if (status === "failed") {
     deps.logger.warn("[inbox-webhook] mensaje saliente fallido", {
       wamid,
       status,
-      reason: failureReasonOf(payload),
+      reason,
     });
-    return;
+  } else {
+    deps.logger.info("[inbox-webhook] estado de entrega", { wamid, status });
   }
 
-  deps.logger.info("[inbox-webhook] estado de entrega", { wamid, status });
+  // Realtime (design D4): el estado por mensaje se refleja por read-through, pero
+  // empujamos una señal `delivery.update` al hilo para que el cliente revalide sin
+  // esperar el poll. Resolvemos la conversación local por su id de Kapso.
+  const kapsoConversationId =
+    payload.message?.kapso?.conversation_id ??
+    payload.message?.kapso?.whatsapp_conversation_id ??
+    null;
+  if (!kapsoConversationId) return;
+
+  const rows = await deps.db
+    .select({
+      id: schema.conversation.id,
+      organizationId: schema.conversation.organizationId,
+    })
+    .from(schema.conversation)
+    .where(eq(schema.conversation.kapsoConversationId, kapsoConversationId))
+    .limit(1);
+  const conversation = rows[0];
+  if (!conversation) return;
+
+  await safePublish(deps, convChannel(conversation.id), {
+    type: "delivery.update",
+    conversationId: conversation.id,
+    wamid,
+    status,
+    reason,
+  });
 }

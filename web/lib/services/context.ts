@@ -8,6 +8,7 @@
 import type { db as DbClient } from "@/lib/db/client";
 import type { EntitlementsPort, UsagePort } from "@/lib/services/billing/ports";
 import type { Logger } from "@/lib/services/logger";
+import type { RealtimePublisher } from "@/lib/services/realtime/ports";
 
 export type CurrentUser = {
   id: string;
@@ -28,6 +29,8 @@ export type ServiceContext = {
   currentUser: CurrentUser;
   currentOrg?: CurrentOrganization;
   logger: Logger;
+  /** Puerto de realtime (publica eventos efímeros). No-op si no hay Centrífugo. */
+  realtime: RealtimePublisher;
 };
 
 export type TenantServiceContext = ServiceContext & {

@@ -1,0 +1,43 @@
+{
+  "http_server": {
+    "port": 8000
+  },
+  "engine": {
+    "type": "redis",
+    "redis": {
+      "address": "redis:6379"
+    }
+  },
+  "client": {
+    "allowed_origins": ["*"],
+    "token": {},
+    "subscribe_to_user_personal_channel": {
+      "enabled": true
+    }
+  },
+  "channel": {
+    "without_namespace": {
+      "allow_subscribe_for_client": true,
+      "presence": true,
+      "join_leave": true,
+      "history_size": 100,
+      "history_ttl": "300s",
+      "force_recovery": true
+    },
+    "namespaces": [
+      {
+        "name": "notify_inbox"
+      }
+    ]
+  },
+  "admin": {
+    "enabled": true
+  },
+  "health": {
+    "enabled": true
+  },
+  "http_api": {},
+  "prometheus": {
+    "enabled": true
+  }
+}

@@ -14,6 +14,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
+import { resolveRealtimePublisher } from "@/lib/integrations/centrifugo/publisher";
 import {
   makeEntitlementsPort,
   makeUsagePort,
@@ -40,6 +41,7 @@ export async function buildServerServiceContext(): Promise<ServiceContext> {
       role: (session.user as { role?: string | null }).role ?? null,
     },
     logger: consoleLogger,
+    realtime: resolveRealtimePublisher(consoleLogger),
   };
 }
 

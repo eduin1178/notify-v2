@@ -15,7 +15,7 @@ API de Centrífugo v6 verificada (Context7):
   body `{"channel": "...", "data": {...}}`. La key corresponde a `http_api.key`.
 - **Tokens**: JWT HS256 firmados con `client.token.hmac_secret_key`. Conexión:
   claims `{sub, exp}`. Suscripción: claims `{sub, channel, exp}`.
-- **Privacidad de namespace**: si el namespace `inbox` NO activa
+- **Privacidad de namespace**: si el namespace `notify_inbox` NO activa
   `allow_subscribe_for_client`, toda suscripción exige subscription token (modelo
   seguro por defecto). El `#` en el nombre de canal está reservado para canales
   limitados por user-id → lo evitamos.
@@ -68,8 +68,8 @@ El webhook solo provee el adaptador en el `ctx`. Las rutas de envío también pu
 publicar por la misma vía para eco inmediato entre agentes (opcional en tasks).
 
 ### D4 — Canales y namespace
-Namespace `inbox` (config en Centrífugo, fuera del repo salvo documentación).
-Canales `inbox:org.<orgId>` e `inbox:conv.<conversationId>`. Sin `#`. El scoping se
+Namespace `notify_inbox` (config en Centrífugo, fuera del repo salvo documentación).
+Canales `notify_inbox:org.<orgId>` e `notify_inbox:conv.<conversationId>`. Sin `#`. El scoping se
 garantiza por subscription token, no por el nombre. El payload de cada publish lleva
 un `type` discriminado (p. ej. `message.new`, `delivery.update`, `conversation.upsert`)
 para que el cliente sepa qué revalidar.
@@ -80,21 +80,21 @@ Dos endpoints REST nuevos bajo `/api/v1/`:
   `{token}` con claims `{sub: userId, exp}`.
 - `POST /api/v1/orgs/:orgId/realtime/subscription-token` (`requireSession` +
   `requireOrgMembership`): valida que el `channel` solicitado pertenece a `:orgId`
-  (prefijo `inbox:org.<orgId>` o `inbox:conv.<id>` cuya conversación es de esa org)
+  (prefijo `notify_inbox:org.<orgId>` o `notify_inbox:conv.<id>` cuya conversación es de esa org)
   y devuelve `{token}` con claims `{sub, channel, exp}`.
 Firmado con `CENTRIFUGO_TOKEN_HMAC_SECRET` vía `jose` (ya presente en el árbol por
 better-auth; se promueve a dependencia directa). Expiraciones cortas (p. ej. 5–10
 min); `centrifuge-js` re-pide token al expirar mediante `getToken`.
 **Alternativa descartada**: firmar con `node:crypto` a mano → factible (el webhook
 ya usa `node:crypto`) pero `jose` es más claro y seguro para JWT.
-**Validación de canal de conversación**: para `inbox:conv.<id>` se verifica que la
+**Validación de canal de conversación**: para `notify_inbox:conv.<id>` se verifica que la
 conversación pertenezca a la org del path antes de emitir (consulta al índice
 local), evitando que un miembro de la org adivine ids de otra org.
 
 ### D6 — Cliente `centrifuge-js`
 Una sola instancia `Centrifuge(NEXT_PUBLIC_CENTRIFUGO_WS_URL, { getToken })` a nivel
-de `InboxClient`. Suscripción a `inbox:org.<orgId>` del número activo (vive mientras
-el inbox esté montado) y a `inbox:conv.<id>` de la conversación abierta (se re-suscribe
+de `InboxClient`. Suscripción a `notify_inbox:org.<orgId>` del número activo (vive mientras
+el inbox esté montado) y a `notify_inbox:conv.<id>` de la conversación abierta (se re-suscribe
 al cambiar de conversación). En `publication` → `mutate(conversationsKey)` y/o
 `mutate(messagesKey)` según el `type` del payload. La conexión y suscripciones se
 limpian en el cleanup del efecto. Respeta el lint de efectos del proyecto.
@@ -134,7 +134,7 @@ se modelan como **opcionales** y el realtime se activa solo si están presentes
 
 ## Migration Plan
 
-1. Configurar el namespace `inbox` y el `http_api.key`/`hmac_secret_key` en el
+1. Configurar el namespace `notify_inbox` y el `http_api.key`/`hmac_secret_key` en el
    Centrífugo desplegado (infra, fuera del repo).
 2. Añadir las 4 variables de entorno (opcionales) y las dependencias.
 3. Desplegar backend (puerto + adaptador + endpoints de token + publish en webhook)

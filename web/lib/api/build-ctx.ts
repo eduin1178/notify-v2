@@ -6,6 +6,7 @@ import {
   makeEntitlementsPort,
   makeUsagePort,
 } from "@/lib/services/billing/adapter";
+import { resolveRealtimePublisher } from "@/lib/integrations/centrifugo/publisher";
 import type { ServiceContext, TenantServiceContext } from "@/lib/services/context";
 import { DomainErrors } from "@/lib/services/errors";
 import { consoleLogger } from "@/lib/services/logger";
@@ -20,6 +21,7 @@ export function buildServiceContext(c: Context<HonoEnv>): ServiceContext {
     currentUser: user,
     currentOrg: c.get("org"),
     logger: consoleLogger,
+    realtime: resolveRealtimePublisher(consoleLogger),
   };
 }
 

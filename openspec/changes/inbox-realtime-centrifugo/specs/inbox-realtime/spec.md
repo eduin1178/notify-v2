@@ -24,9 +24,9 @@ implementación no-op.
 
 ### Requirement: Modelo de canales multi-tenant del inbox
 
-El sistema SHALL usar el namespace `inbox` con dos tipos de canal:
-`inbox:org.<orgId>` para eventos de la lista de conversaciones de una organización,
-e `inbox:conv.<conversationId>` para eventos del hilo de una conversación. Los
+El sistema SHALL usar el namespace `notify_inbox` con dos tipos de canal:
+`notify_inbox:org.<orgId>` para eventos de la lista de conversaciones de una organización,
+e `notify_inbox:conv.<conversationId>` para eventos del hilo de una conversación. Los
 nombres de canal NO SHALL usar el carácter `#` (reservado por Centrífugo para
 canales limitados por user-id). El identificador de organización y de conversación
 SHALL formar parte del nombre del canal de modo que un evento se entregue solo a
@@ -34,15 +34,15 @@ los suscriptores del canal correspondiente.
 
 #### Scenario: Evento de lista por organización
 - **WHEN** ocurre un cambio que afecta la lista de conversaciones de una organización (nueva conversación, reorden, no leídos, estado de ventana)
-- **THEN** el sistema publica en `inbox:org.<orgId>`
+- **THEN** el sistema publica en `notify_inbox:org.<orgId>`
 
 #### Scenario: Evento de hilo por conversación
 - **WHEN** ocurre un cambio en una conversación (mensaje nuevo, estado de entrega)
-- **THEN** el sistema publica en `inbox:conv.<conversationId>`
+- **THEN** el sistema publica en `notify_inbox:conv.<conversationId>`
 
 ### Requirement: Autorización de suscripción por membresía de organización
 
-El namespace `inbox` NO SHALL habilitar `allow_subscribe_for_client`, de modo que
+El namespace `notify_inbox` NO SHALL habilitar `allow_subscribe_for_client`, de modo que
 toda suscripción exija un subscription token. El sistema SHALL emitir un token de
 conexión JWT (con `sub` = id del usuario autenticado) y tokens de suscripción JWT
 por canal (con claims `sub`, `channel` y `exp`), ambos firmados con
@@ -55,7 +55,7 @@ organización (reutilizando la verificación de membresía existente).
 - **THEN** el sistema devuelve un JWT firmado con `sub` igual al id del usuario y una expiración
 
 #### Scenario: Suscripción autorizada a su organización
-- **WHEN** un usuario miembro de la organización X solicita un token de suscripción para `inbox:org.X` o un `inbox:conv.<id>` de esa organización
+- **WHEN** un usuario miembro de la organización X solicita un token de suscripción para `notify_inbox:org.X` o un `notify_inbox:conv.<id>` de esa organización
 - **THEN** el sistema devuelve un subscription token JWT válido para ese canal
 
 #### Scenario: Suscripción denegada a otra organización
@@ -70,7 +70,7 @@ organización (reutilizando la verificación de membresía existente).
 
 El cliente del inbox SHALL conectarse al WebSocket de Centrífugo
 (`NEXT_PUBLIC_CENTRIFUGO_WS_URL`) usando el token de conexión, y SHALL suscribirse
-a `inbox:org.<orgId>` del número activo y a `inbox:conv.<conversationId>` de la
+a `notify_inbox:org.<orgId>` del número activo y a `notify_inbox:conv.<conversationId>` de la
 conversación abierta, obteniendo los subscription tokens desde la API. Al recibir
 una publicación, el cliente SHALL revalidar los datos correspondientes (disparar
 `mutate` de SWR) en lugar de esperar al siguiente poll.

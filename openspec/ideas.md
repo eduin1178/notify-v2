@@ -6,6 +6,11 @@
 - Asignar conversaciones a bots
 
 - Puede ser necesario manejar bien una cola para evitar entrecruzamiento de mensajes. Cuando se envian muy rapido se entrecruzan.
+- Registrar anotaciones
+- Mostrar cambios de estado en el hilo de la conversacion
+- Mostrar asignación de agentes
+- Mostrar identificador que muestre cuando inición una nueva ventana de 24 horas despues de cerrarse.
+- Mostrar fechas, dado que actualmente sale solo la hora en los mensajes, especialmente si ya es una fecha pasada. Igual que whatsapp
 
 ## Dashboard
 - Mostrar la cantidad de mensajes entrantes y salientes por cada número de telpefono.

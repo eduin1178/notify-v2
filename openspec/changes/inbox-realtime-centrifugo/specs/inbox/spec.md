@@ -10,7 +10,7 @@ El sistema SHALL recibir los eventos de Kapso `whatsapp.message.received`, `what
 
 #### Scenario: Publicación de realtime tras commit
 - **WHEN** el sistema termina de ingerir un entrante o un cambio de estado de entrega y confirma el commit
-- **THEN** publica el evento correspondiente en `inbox:org.<orgId>` y, si aplica, en `inbox:conv.<conversationId>`
+- **THEN** publica el evento correspondiente en `notify_inbox:org.<orgId>` y, si aplica, en `notify_inbox:conv.<conversationId>`
 
 #### Scenario: Fallo de publicación no rompe el webhook
 - **WHEN** la publicación a Centrífugo falla tras una ingesta confirmada

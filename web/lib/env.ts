@@ -37,6 +37,18 @@ const envSchema = z.object({
   R2_BUCKET: z.string().min(1).optional(),
   // URL pública base del bucket (dominio R2 o dominio propio) para el `link`.
   R2_PUBLIC_BASE_URL: z.string().url().optional(),
+
+  // Centrífugo (realtime del inbox, change inbox-realtime-centrifugo). Opcionales:
+  // la app arranca sin ellas y el inbox degrada a polling de respaldo. El realtime
+  // se activa solo si están presentes. El HMAC debe coincidir con
+  // `client.token.hmac_secret_key` y la API key con `http_api.key` del servidor
+  // desplegado (ver infra/centrifugo/README.md).
+  // Server-side (publicación + firmado de tokens):
+  CENTRIFUGO_API_URL: z.string().url().optional(),
+  CENTRIFUGO_API_KEY: z.string().min(1).optional(),
+  CENTRIFUGO_TOKEN_HMAC_SECRET: z.string().min(1).optional(),
+  // Cliente (va al navegador): URL del WebSocket de Centrífugo.
+  NEXT_PUBLIC_CENTRIFUGO_WS_URL: z.string().url().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

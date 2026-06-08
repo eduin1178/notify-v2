@@ -20,11 +20,11 @@ y nuestro backend solo *publica* por HTTP API tras procesar los webhooks.
   **después** de confirmar el commit en BD (tras `ingestInboundMessage` e
   `ingestDeliveryStatus`). Las rutas de envío pueden publicar también para eco
   inmediato entre agentes de la misma organización.
-- **Canales multi-tenant**: namespace `inbox` con `inbox:org.<orgId>` (eventos de
+- **Canales multi-tenant**: namespace `notify_inbox` con `notify_inbox:org.<orgId>` (eventos de
   lista: nueva conversación, reorden, no leídos, estado de ventana) e
-  `inbox:conv.<conversationId>` (eventos del hilo: mensaje nuevo, estado de
+  `notify_inbox:conv.<conversationId>` (eventos del hilo: mensaje nuevo, estado de
   entrega). Se evita el carácter `#` (en Centrífugo delimita canales por user-id).
-- **Seguridad por tokens**: el namespace `inbox` NO habilita
+- **Seguridad por tokens**: el namespace `notify_inbox` NO habilita
   `allow_subscribe_for_client`, de modo que toda suscripción exige un
   **subscription token** JWT. Nuestra API emite el token de conexión (`sub=userId`)
   y los tokens de suscripción por canal **solo tras verificar la membresía** de la

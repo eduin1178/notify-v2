@@ -57,6 +57,7 @@ import {
   sendMessageRequestJson,
 } from "./inbox/send-helpers";
 import { useAttachmentDraft } from "./inbox/use-attachment-draft";
+import { useInboxRealtime } from "./inbox/use-inbox-realtime";
 
 type StatusFilter = "" | NotifyStatusT;
 type AssignmentFilter = "all" | "mine" | "unassigned" | "others";
@@ -299,7 +300,10 @@ export function InboxClient({
 
   const { data: convData, isLoading: convLoading } =
     useSWR<ConversationListResponseT>(conversationsKey, fetcher, {
-      refreshInterval: 4000,
+      // Polling de respaldo lento (T7.1): el realtime de Centrífugo empuja los
+      // cambios; SWR solo cubre el hueco si el WS no está disponible. Mantiene
+      // revalidateOnFocus/revalidateOnReconnect por defecto (T7.2).
+      refreshInterval: 45000,
       keepPreviousData: true,
       fallbackData: isInitialKey
         ? {
@@ -335,9 +339,14 @@ export function InboxClient({
 
   const { data: msgData, isLoading: msgLoading } =
     useSWR<MessageThreadResponseT>(messagesKey, fetcher, {
-      refreshInterval: 4000,
+      // Respaldo lento; el push del canal de la conversación revalida el hilo (T7.1).
+      refreshInterval: 45000,
       keepPreviousData: true,
     });
+
+  // Realtime: conecta al WS de Centrífugo y revalida lista/hilo ante cada push.
+  // Degrada con gracia si no hay configuración pública o el WS no conecta (T7.3).
+  useInboxRealtime({ orgId, selectedId, conversationsKey, messagesKey });
 
   const messages = useMemo(
     () => [...(msgData?.items ?? [])].reverse(),

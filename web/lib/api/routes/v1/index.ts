@@ -9,6 +9,7 @@ import { inboxRouter } from "@/lib/api/routes/v1/orgs/inbox";
 import { listMembersRouter } from "@/lib/api/routes/v1/orgs/list-members";
 import { tagsRouter } from "@/lib/api/routes/v1/orgs/tags";
 import { whatsappConnectionsRouter } from "@/lib/api/routes/v1/orgs/whatsapp-connections";
+import { realtimeRouter } from "@/lib/api/routes/v1/realtime";
 
 export const v1Router = new OpenAPIHono<HonoEnv>()
   .route("/", meRouter)
@@ -20,6 +21,7 @@ export const v1Router = new OpenAPIHono<HonoEnv>()
   .route("/", contactsCsvRouter)
   .route("/", contactsRouter)
   .route("/", tagsRouter)
-  .route("/", inboxRouter);
+  .route("/", inboxRouter)
+  .route("/", realtimeRouter);
 
 export type V1Router = typeof v1Router;

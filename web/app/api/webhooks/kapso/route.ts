@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { schema } from "@/lib/db/schema";
 import { env } from "@/lib/env";
+import { resolveRealtimePublisher } from "@/lib/integrations/centrifugo/publisher";
 import { ensureMessageWebhook } from "@/lib/integrations/kapso/client";
 import { verifyKapsoSignature } from "@/lib/integrations/kapso/webhook";
 import { consoleLogger } from "@/lib/services/logger";
@@ -112,7 +113,14 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Already processed", { status: 200 });
   }
 
-  const deps = { db, logger: consoleLogger };
+  // Publicador real de Centrífugo si está configurado; no-op en caso contrario.
+  // safePublish en el servicio + best-effort del adaptador garantizan que un
+  // fallo de publish NO derive en 500 (no fuerza reintentos de Kapso).
+  const deps = {
+    db,
+    logger: consoleLogger,
+    realtime: resolveRealtimePublisher(consoleLogger),
+  };
 
   try {
     if (event === "whatsapp.phone_number.created") {
