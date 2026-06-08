@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
+import { toast } from "sonner";
 import {
   ChatCircleTextIcon,
   CheckIcon,
@@ -145,7 +146,14 @@ export function InboxClient({
   const [status, setStatus] = useState<StatusFilter>("");
   const [assignment, setAssignment] = useState<AssignmentFilter>("all");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // El seleccionado se inicializa desde `?c` (deep-link/recarga) sin efecto.
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    searchParams.get("c"),
+  );
+  // Conversación resuelta por id cuando no está en la lista (otro número/filtro).
+  const [resolvedConv, setResolvedConv] = useState<ConversationDtoT | null>(
+    null,
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templateTarget, setTemplateTarget] = useState<{
     conversationId: string;
@@ -162,6 +170,18 @@ export function InboxClient({
   const [dragging, setDragging] = useState(false);
   const dragCounter = useRef(0);
   const handledStartRef = useRef(false);
+  // Centinela al fondo del hilo para el auto-desplazamiento al último mensaje.
+  const bottomRef = useRef<HTMLDivElement>(null);
+  // Evita re-resolver por id el mismo `?c` en cada render del efecto.
+  const resolvedConvRef = useRef<string | null>(null);
+  // Animación sutil de feedback en la cabecera tras cambiar estado/asignación.
+  const [flash, setFlash] = useState(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function pulse() {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    setFlash(true);
+    flashTimer.current = setTimeout(() => setFlash(false), 600);
+  }
 
   const conversationsKey = useMemo(() => {
     if (!connectionId) return null;
@@ -207,8 +227,10 @@ export function InboxClient({
   }, [convData, tab]);
 
   const selected = useMemo(
-    () => conversations.find((c) => c.id === selectedId) ?? null,
-    [conversations, selectedId],
+    () =>
+      conversations.find((c) => c.id === selectedId) ??
+      (resolvedConv?.id === selectedId ? resolvedConv : null),
+    [conversations, selectedId, resolvedConv],
   );
 
   const messagesKey = selectedId
@@ -249,6 +271,7 @@ export function InboxClient({
     setTab("todas");
     setSearch("");
     setSelectedId(conv.id);
+    router.replace(`${pathname}?c=${conv.id}`);
     revalidate();
   }
 
@@ -260,6 +283,7 @@ export function InboxClient({
     if (!startContact || !connectionId || handledStartRef.current) return;
     handledStartRef.current = true;
     (async () => {
+      let resolvedId: string | null = null;
       try {
         const conv = (await apiSend(
           `/api/v1/orgs/${orgId}/inbox/conversations`,
@@ -267,6 +291,7 @@ export function InboxClient({
           { connectionId, contactId: startContact, kind: "template" },
         )) as ConversationDtoT | null;
         if (conv?.id) {
+          resolvedId = conv.id;
           focusConversation(conv);
           if (!conv.windowOpen) {
             setTemplateTarget({
@@ -278,10 +303,56 @@ export function InboxClient({
       } catch {
         // Silencioso: si falla, el usuario puede iniciar manualmente.
       }
-      router.replace(pathname);
+      // Quita `?startContact`; conserva `?c` si se resolvió la conversación.
+      router.replace(resolvedId ? `${pathname}?c=${resolvedId}` : pathname);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, connectionId, orgId]);
+
+  // Resuelve `?c=<id>` cuando la conversación NO está en la lista cargada (otro
+  // número o fuera del filtro): la pide por id, cambia de número y la deja como
+  // respaldo para mostrarla aunque la lista aún no la incluya. Si el id no existe,
+  // limpia el parámetro. El caso normal (en la lista) lo cubre el inicializador
+  // perezoso de `selectedId`; aquí los `setState` van tras `await` para no
+  // disparar la regla de "setState síncrono en efecto".
+  useEffect(() => {
+    const c = searchParams.get("c");
+    if (!c) {
+      resolvedConvRef.current = null;
+      return;
+    }
+    if (conversations.some((x) => x.id === c)) return;
+    if (resolvedConvRef.current === c) return;
+    resolvedConvRef.current = c;
+    (async () => {
+      try {
+        const conv = (await apiSend(
+          `/api/v1/orgs/${orgId}/inbox/conversations/${c}`,
+          "GET",
+        )) as ConversationDtoT | null;
+        if (conv?.id) {
+          setConnectionId(conv.connectionId);
+          setResolvedConv(conv);
+          setSelectedId(conv.id);
+        } else {
+          router.replace(pathname);
+        }
+      } catch {
+        // Id inexistente o sin acceso: limpia el parámetro.
+        router.replace(pathname);
+      }
+    })();
+  }, [searchParams, conversations, orgId, pathname, router]);
+
+  // Auto-desplazamiento al último mensaje al abrir o al llegar mensajes nuevos.
+  // Se mueve SOLO el viewport del hilo (no `scrollIntoView`, que también
+  // desplazaría la ventana y escondería el header/composer).
+  useEffect(() => {
+    const viewport = bottomRef.current?.closest<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }, [selectedId, messages.length]);
 
   /** Descarta el borrador de adjunto al cambiar de conversación o número. */
   function resetDraft() {
@@ -325,6 +396,7 @@ export function InboxClient({
   function selectConversation(conv: ConversationDtoT) {
     if (conv.id !== selectedId) resetDraft();
     setSelectedId(conv.id);
+    router.replace(`${pathname}?c=${conv.id}`);
     if (conv.unreadCount > 0) {
       apiSend(
         `/api/v1/orgs/${orgId}/inbox/conversations/${conv.id}/read`,
@@ -337,22 +409,41 @@ export function InboxClient({
 
   async function changeStatus(value: NotifyStatusT) {
     if (!selected) return;
-    await apiSend(
-      `/api/v1/orgs/${orgId}/inbox/conversations/${selected.id}`,
-      "PATCH",
-      { status: value },
-    );
-    revalidate();
+    try {
+      await apiSend(
+        `/api/v1/orgs/${orgId}/inbox/conversations/${selected.id}`,
+        "PATCH",
+        { status: value },
+      );
+      revalidate();
+      pulse();
+      toast.success(`Estado actualizado a ${STATUS_LABEL[value] ?? value}`);
+    } catch {
+      toast.error("No se pudo actualizar el estado.");
+    }
   }
 
   async function changeAssignment(userId: string) {
     if (!selected) return;
-    await apiSend(
-      `/api/v1/orgs/${orgId}/inbox/conversations/${selected.id}/assignment`,
-      "PUT",
-      { userId: userId || null },
-    );
-    revalidate();
+    try {
+      await apiSend(
+        `/api/v1/orgs/${orgId}/inbox/conversations/${selected.id}/assignment`,
+        "PUT",
+        { userId: userId || null },
+      );
+      revalidate();
+      pulse();
+      const name = (membersData?.members ?? []).find(
+        (m) => m.userId === userId,
+      )?.name;
+      toast.success(
+        userId
+          ? `Conversación asignada a ${name ?? "otro agente"}`
+          : "Conversación sin asignar",
+      );
+    } catch {
+      toast.error("No se pudo cambiar la asignación.");
+    }
   }
 
   if (!connectionId) {
@@ -380,6 +471,7 @@ export function InboxClient({
                 resetDraft();
                 setConnectionId(e.target.value);
                 setSelectedId(null);
+                router.replace(pathname);
               }}
               aria-label="Número de WhatsApp"
             >
@@ -556,7 +648,12 @@ export function InboxClient({
           </div>
         ) : (
           <>
-            <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
+            <header
+              className={cn(
+                "flex items-center justify-between gap-3 border-b px-4 py-3 transition-colors duration-500",
+                flash && "bg-primary/5",
+              )}
+            >
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar className="size-9">
                   <AvatarFallback>
@@ -631,7 +728,7 @@ export function InboxClient({
               )}
             </div>
 
-            <ScrollArea className="min-h-0 flex-1 bg-muted/10">
+            <ScrollArea className="min-h-0 flex-1 bg-(--chat-bg)">
               <div className="space-y-2 p-4">
               {msgLoading && messages.length === 0 ? (
                 <div className="space-y-2">
@@ -646,6 +743,7 @@ export function InboxClient({
               ) : (
                 messages.map((m) => <MessageBubble key={m.id} message={m} />)
               )}
+              <div ref={bottomRef} />
               </div>
             </ScrollArea>
 
@@ -989,7 +1087,7 @@ function TemplateDialog({
         onOpenChange(v);
       }}
     >
-      <DialogContent>
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Enviar plantilla</DialogTitle>
           <DialogDescription>
@@ -997,7 +1095,7 @@ function TemplateDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="flex-1 space-y-4 overflow-y-auto py-2">
           {error && (
             <p className="flex items-center gap-1.5 text-xs text-destructive">
               <WarningCircleIcon className="size-3.5" />
@@ -1671,7 +1769,7 @@ function DeliveryStatus({ status }: { status: string | null }) {
   const label = DELIVERY_LABEL[status] ?? status;
   if (status === "failed") {
     return (
-      <span className="inline-flex items-center gap-0.5 text-red-200">
+      <span className="inline-flex items-center gap-0.5 text-red-600">
         <WarningCircleIcon className="size-3" /> {label}
       </span>
     );
@@ -1679,7 +1777,7 @@ function DeliveryStatus({ status }: { status: string | null }) {
   if (status === "read" || status === "delivered") {
     return (
       <span className="inline-flex items-center gap-0.5">
-        <ChecksIcon className={cn("size-3", status === "read" && "text-sky-300")} />
+        <ChecksIcon className={cn("size-3", status === "read" && "text-sky-500")} />
       </span>
     );
   }
@@ -1715,7 +1813,7 @@ function DownloadLink({
       download
       className={cn(
         "inline-flex items-center gap-1.5 text-xs underline-offset-2 hover:underline",
-        outbound ? "text-white/90" : "text-foreground",
+        outbound ? "text-(--chat-out-foreground)/90" : "text-foreground",
       )}
     >
       <DownloadSimpleIcon className="size-4 shrink-0" />
@@ -1735,25 +1833,20 @@ function MessageMedia({
   const url = message.mediaUrl;
 
   if (message.type === "image") {
+    // Llena la burbuja (estilo WhatsApp); abrir/descargar al hacer clic.
     return (
-      <div className="mb-1 space-y-1">
+      <a href={url} target="_blank" rel="noreferrer" download className="block">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
           alt={message.caption ?? "Imagen"}
-          className="max-h-60 rounded-md"
+          className="max-h-80 w-full rounded-md object-cover"
         />
-        <DownloadLink url={url} label="Descargar imagen" outbound={outbound} />
-      </div>
+      </a>
     );
   }
   if (message.type === "video") {
-    return (
-      <div className="mb-1 space-y-1">
-        <video src={url} controls className="max-h-60 rounded-md" />
-        <DownloadLink url={url} label="Descargar video" outbound={outbound} />
-      </div>
-    );
+    return <video src={url} controls className="max-h-80 w-full rounded-md" />;
   }
   if (message.type === "audio") {
     return (
@@ -1775,7 +1868,7 @@ function MessageMedia({
       className={cn(
         "mb-1 flex items-center gap-2 rounded-md border px-2.5 py-2",
         outbound
-          ? "border-white/30 hover:bg-white/10"
+          ? "border-(--chat-out-foreground)/20 hover:bg-(--chat-out-foreground)/10"
           : "border-border hover:bg-muted",
       )}
     >
@@ -1796,39 +1889,49 @@ function MessageBubble({ message }: { message: MessageDtoT }) {
   // `caption`); evita que descripciones autogeneradas o URLs rompan la burbuja.
   const showText = message.text && !message.mediaUrl;
   const interactiveReply = !outbound && isInteractive(message);
+  // Imagen/video llenan la burbuja (estilo WhatsApp): casi sin padding y el
+  // resto del contenido (caption, hora) con su propio padding.
+  const isPhoto =
+    !!message.mediaUrl &&
+    (message.type === "image" || message.type === "video");
   return (
     <div className={cn("flex", outbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[75%] rounded-lg px-3 py-2 text-sm shadow-sm",
+          "max-w-[75%] overflow-hidden rounded-lg text-sm shadow-sm",
+          isPhoto ? "p-[3px]" : "px-3 py-2",
           outbound
-            ? "bg-green-600 text-white"
+            ? "bg-(--chat-out) text-(--chat-out-foreground)"
             : "bg-background text-foreground",
         )}
       >
         <MessageMedia message={message} outbound={outbound} />
-        {interactiveReply && (
-          <span className="mb-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-            <ListBulletsIcon className="size-3" /> Respuesta
-          </span>
-        )}
-        {showText && <p className="whitespace-pre-wrap">{message.text}</p>}
-        {message.caption && (
-          <p className="whitespace-pre-wrap">{message.caption}</p>
-        )}
-        {message.transcript && (
-          <p className="mt-1 text-xs italic opacity-80">
-            {message.transcript}
-          </p>
-        )}
-        <div
-          className={cn(
-            "mt-1 flex items-center justify-end gap-1 text-[10px]",
-            outbound ? "text-white/70" : "text-muted-foreground",
+        <div className={cn(isPhoto && "px-1.5 pt-1")}>
+          {interactiveReply && (
+            <span className="mb-0.5 flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <ListBulletsIcon className="size-3" /> Respuesta
+            </span>
           )}
-        >
-          {fmtTime(message.timestamp)}
-          {outbound && <DeliveryStatus status={message.status} />}
+          {showText && <p className="whitespace-pre-wrap">{message.text}</p>}
+          {message.caption && (
+            <p className="whitespace-pre-wrap">{message.caption}</p>
+          )}
+          {message.transcript && (
+            <p className="mt-1 text-xs italic opacity-80">
+              {message.transcript}
+            </p>
+          )}
+          <div
+            className={cn(
+              "mt-1 flex items-center justify-end gap-1 text-[10px]",
+              outbound
+                ? "text-(--chat-out-foreground)/60"
+                : "text-muted-foreground",
+            )}
+          >
+            {fmtTime(message.timestamp)}
+            {outbound && <DeliveryStatus status={message.status} />}
+          </div>
         </div>
       </div>
     </div>

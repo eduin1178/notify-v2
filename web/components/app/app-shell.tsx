@@ -10,6 +10,7 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar, type AppSidebarProps } from "@/components/app/app-sidebar";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 type Props = AppSidebarProps & {
   children: React.ReactNode;
@@ -25,18 +26,17 @@ export function AppShell({ children, ...sidebarProps }: Props) {
     <TooltipProvider delayDuration={0}>
       <SidebarProvider>
         <AppSidebar {...sidebarProps} />
-        <SidebarInset>
+        {/* En el inbox, el shell es una columna de altura RÍGIDA (h-svh +
+            overflow-hidden): el header ocupa su alto y el `main` el resto vía
+            flex, sin `calc` ni desbordes de la ventana. El scroll vive dentro
+            del hilo/lista. El resto de vistas conservan el flujo normal. */}
+        <SidebarInset className={cn(fullBleed && "h-svh overflow-hidden")}>
           <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-2 h-4" />
           </header>
           {fullBleed ? (
-            // Altura DEFINIDA (viewport − header h-14) para que el `h-full` del
-            // inbox resuelva y el scroll viva en la lista y el hilo, no en la
-            // ventana. `min-h-svh` del wrapper no es altura definida.
-            <main className="h-[calc(100svh-3.5rem)] overflow-hidden">
-              {children}
-            </main>
+            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
           ) : (
             <main className="flex-1 px-4 py-8">
               <div className="mx-auto w-full max-w-5xl">{children}</div>

@@ -7,6 +7,11 @@
 :root {
   --background: oklch(1.0000 0 0);
   --foreground: oklch(0.1448 0 0);
+  /* Fondo del área de chat, tipo WhatsApp (cálido, no blanco puro). */
+  --chat-bg: #efeae2;
+  /* Burbuja de mensaje saliente, tipo WhatsApp (verde claro, texto oscuro). */
+  --chat-out: #d9fdd3;
+  --chat-out-foreground: #111b21;
   --card: oklch(1.0000 0 0);
   --card-foreground: oklch(0.1448 0 0);
   --popover: oklch(1.0000 0 0);
@@ -65,6 +70,11 @@
 .dark {
   --background: oklch(0.1408 0.0044 285.8229);
   --foreground: oklch(0.9851 0 0);
+  /* Fondo del área de chat, tipo WhatsApp (oscuro azulado, no negro puro). */
+  --chat-bg: #0b141a;
+  /* Burbuja de mensaje saliente, tipo WhatsApp (verde teal, texto claro). */
+  --chat-out: #005c4b;
+  --chat-out-foreground: #e9edef;
   --card: oklch(0.1408 0.0044 285.8229);
   --card-foreground: oklch(0.9851 0 0);
   --popover: oklch(0.1408 0.0044 285.8229);

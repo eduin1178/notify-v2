@@ -265,6 +265,49 @@ async function loadOwnedConversation(
   return row;
 }
 
+/**
+ * Devuelve una conversación del índice local por id, como DTO (con contacto y
+ * agente). Incluye `connectionId`, necesario para que el deep-link `?c=<id>`
+ * abra una conversación de un número distinto al seleccionado.
+ */
+export async function getConversationById(
+  ctx: TenantServiceContext,
+  id: string,
+): Promise<ConversationDtoT> {
+  const rows = await ctx.db
+    .select({
+      conv: schema.conversation,
+      contactId: schema.contact.id,
+      contactFirst: schema.contact.firstName,
+      contactLast: schema.contact.lastName,
+      contactPhone: schema.contact.phone,
+      userId: schema.user.id,
+      userName: schema.user.name,
+      userImage: schema.user.image,
+    })
+    .from(schema.conversation)
+    .leftJoin(
+      schema.contact,
+      eq(schema.conversation.contactId, schema.contact.id),
+    )
+    .leftJoin(
+      schema.user,
+      eq(schema.conversation.assignedUserId, schema.user.id),
+    )
+    .where(
+      and(
+        eq(schema.conversation.id, id),
+        eq(schema.conversation.organizationId, ctx.currentOrg.id),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    throw DomainErrors.notFound("Conversación no encontrada.");
+  }
+  return toConversationDto(row, new Date());
+}
+
 /** Hilo de mensajes de una conversación (read-through desde Kapso). */
 export async function getMessages(
   ctx: TenantServiceContext,

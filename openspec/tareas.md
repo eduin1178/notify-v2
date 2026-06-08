@@ -5,3 +5,5 @@
 3. El color de fondo del área de chat no debe ser ni negro puro ni blanco puro en dark/light. Debe ser lo mas parecido posible al color de fondo que usa WhatsApp
 
 4. Como las plantillas pueden llega a tener muchas variables, el área de los imputs de cada variable debería ser scroleable y además me gusta que el formulario sea un poco mas ancho, algunos campos pueden tener bastante contenido. 
+
+5. Debe haber algún tipo de feedbak para enterar al usuario que se asignó la conversacón a otro usuario o que cambió de estado.

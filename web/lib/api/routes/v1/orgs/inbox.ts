@@ -29,6 +29,7 @@ import {
 import {
   assignConversation,
   createUpload,
+  getConversationById,
   getInboxSettings,
   getMessages,
   listConversations,
@@ -81,6 +82,22 @@ const conversationsRoute = createRoute({
     200: {
       description: "Página de conversaciones.",
       content: { "application/json": { schema: ConversationListResponse } },
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
+const getConversationRoute = createRoute({
+  method: "get",
+  path: "/orgs/{orgId}/inbox/conversations/{id}",
+  tags: TAGS,
+  summary: "Obtener una conversación por id (incluye su connectionId)",
+  middleware: [requireSession, requireOrgMembership] as const,
+  request: { params: ConversationItemParam },
+  responses: {
+    200: {
+      description: "Conversación del índice local.",
+      content: { "application/json": { schema: ConversationDto } },
     },
     ...COMMON_ERRORS,
   },
@@ -326,6 +343,12 @@ export const inboxRouter = new OpenAPIHono<HonoEnv>()
     const query = c.req.valid("query");
     const ctx = buildTenantServiceContext(c);
     const result = await listConversations(ctx, query);
+    return c.json(result, 200);
+  })
+  .openapi(getConversationRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const ctx = buildTenantServiceContext(c);
+    const result = await getConversationById(ctx, id);
     return c.json(result, 200);
   })
   .openapi(messagesRoute, async (c) => {
